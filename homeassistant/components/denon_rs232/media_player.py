@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
-import logging
 import re
 
 from denon_rs232 import (
@@ -26,10 +24,7 @@ from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers.device_registry import DeviceInfo
 from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
-from . import DenonRS232ConfigEntry
-from .const import DOMAIN
-
-_LOGGER = logging.getLogger(__name__)
+from .const import DOMAIN, DenonRS232ConfigEntry
 
 PARALLEL_UPDATES = 1
 
@@ -133,30 +128,26 @@ class DenonRS232MediaPlayer(MediaPlayerEntity):
             )
             self._attr_sound_mode_list = list(self._sound_mode_by_state)
 
-        self._unsub: Callable[[], None] | None = None
-        self._update_from_state(receiver.state)
+        self._volume_min = MIN_VOLUME_DB
+        self._volume_range = VOLUME_DB_RANGE
+        self._async_update_from_state(receiver.state)
 
     async def async_added_to_hass(self) -> None:
         """Subscribe to receiver state updates."""
-        self._unsub = self._receiver.subscribe(self._on_state_update)
-
-    async def async_will_remove_from_hass(self) -> None:
-        """Unsubscribe from receiver state updates."""
-        if self._unsub is not None:
-            self._unsub()
-            self._unsub = None
+        self.async_on_remove(self._receiver.subscribe(self._async_on_state_update))
 
     @callback
-    def _on_state_update(self, state: DenonState | None) -> None:
+    def _async_on_state_update(self, state: DenonState | None) -> None:
         """Handle a state update from the receiver."""
         if state is None:
             self._attr_available = False
         else:
             self._attr_available = True
-            self._update_from_state(state)
+            self._async_update_from_state(state)
         self.async_write_ha_state()
 
-    def _update_from_state(self, state: DenonState) -> None:
+    @callback
+    def _async_update_from_state(self, state: DenonState) -> None:
         """Update entity attributes from a DenonState snapshot."""
         if state.power == PowerState.ON:
             self._attr_state = MediaPlayerState.ON
@@ -165,8 +156,20 @@ class DenonRS232MediaPlayer(MediaPlayerEntity):
         else:
             self._attr_state = None
 
+        if state.volume_min is not None:
+            self._volume_min = state.volume_min
+
+        if (
+            state.volume_min is not None
+            and state.volume_max is not None
+            and state.volume_max > state.volume_min
+        ):
+            self._volume_range = state.volume_max - state.volume_min
+
         if state.volume is not None:
-            self._attr_volume_level = (state.volume - MIN_VOLUME_DB) / VOLUME_DB_RANGE
+            self._attr_volume_level = (
+                state.volume - self._volume_min
+            ) / self._volume_range
         else:
             self._attr_volume_level = None
 
@@ -192,7 +195,7 @@ class DenonRS232MediaPlayer(MediaPlayerEntity):
 
     async def async_set_volume_level(self, volume: float) -> None:
         """Set volume level, range 0..1."""
-        db = volume * VOLUME_DB_RANGE + MIN_VOLUME_DB
+        db = volume * self._volume_range + self._volume_min
         await self._receiver.set_volume(db)
 
     async def async_volume_up(self) -> None:

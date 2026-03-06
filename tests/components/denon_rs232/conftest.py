@@ -1,6 +1,6 @@
 """Test fixtures for the Denon RS232 integration."""
 
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from denon_rs232 import (
     DenonReceiver,
@@ -14,13 +14,14 @@ from denon_rs232 import (
 from denon_rs232.models import MODELS
 import pytest
 
-from homeassistant.components.denon_rs232.const import CONF_MODEL, DOMAIN
-from homeassistant.const import CONF_PORT
+from homeassistant.components.denon_rs232.const import DOMAIN
+from homeassistant.const import CONF_DEVICE, CONF_MODEL
+from homeassistant.core import HomeAssistant
+from homeassistant.setup import async_setup_component
 
 from tests.common import MockConfigEntry
 
-MOCK_PORT = "/dev/ttyUSB0"
-MOCK_MODEL = "avr_3805"
+from . import MOCK_DEVICE, MOCK_MODEL
 
 
 def _default_state() -> DenonState:
@@ -29,6 +30,8 @@ def _default_state() -> DenonState:
         power=PowerState.ON,
         main_zone=True,
         volume=-30.0,
+        volume_min=-80,
+        volume_max=10,
         mute=False,
         input_source=InputSource.CD,
         surround_mode="STEREO",
@@ -56,7 +59,22 @@ def mock_receiver() -> MagicMock:
     receiver.connected = True
     receiver.state = _default_state()
     receiver.model = MODELS[MOCK_MODEL]
-    receiver.subscribe = MagicMock(return_value=MagicMock())
+
+    subscribers = receiver._subscribers = []
+
+    def subscribe(callback):
+        subscribers.append(callback)
+        return lambda: subscribers.remove(callback)
+
+    receiver.subscribe = subscribe
+
+    def mock_state(state: DenonState | None) -> None:
+        receiver.state = state
+        for sub in list(subscribers):
+            sub(state)
+
+    receiver.mock_state = mock_state
+
     return receiver
 
 
@@ -65,6 +83,23 @@ def mock_config_entry() -> MockConfigEntry:
     """Create a mock config entry."""
     return MockConfigEntry(
         domain=DOMAIN,
-        data={CONF_PORT: MOCK_PORT, CONF_MODEL: MOCK_MODEL},
-        title=f"Denon AVR-3805 / AVC-3890 ({MOCK_PORT})",
+        data={CONF_DEVICE: MOCK_DEVICE, CONF_MODEL: MOCK_MODEL},
+        title=MODELS[MOCK_MODEL].name,
     )
+
+
+@pytest.fixture
+async def init_components(
+    hass: HomeAssistant, mock_receiver: MagicMock, mock_config_entry: MockConfigEntry
+) -> None:
+    """Initialize the Denon component."""
+    hass.config.components.add("usb")
+    mock_config_entry.add_to_hass(hass)
+    with patch(
+        "homeassistant.components.denon_rs232.DenonReceiver",
+        return_value=mock_receiver,
+    ):
+        assert await async_setup_component(hass, DOMAIN, {})
+        await hass.async_block_till_done()
+        await hass.async_block_till_done()
+        await hass.async_block_till_done()

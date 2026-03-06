@@ -11,11 +11,19 @@
       "user": {
         "data": {
           "model": "Receiver model",
-          "port": "[%key:common::config_flow::data::port%]"
+          "device": "[%key:common::config_flow::data::port%]"
         },
         "data_description": {
           "model": "Select the receiver model",
-          "port": "Serial port path to connect to"
+          "device": "Serial port path to connect to"
+        }
+      },
+      "manual": {
+        "data": {
+          "device": "[%key:common::config_flow::data::port%]"
+        },
+        "data_description": {
+          "device": "Serial port path to connect to"
         }
       }
     }
