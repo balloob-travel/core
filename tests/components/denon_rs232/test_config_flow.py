@@ -87,7 +87,7 @@ async def test_user_form_creates_entry(hass: HomeAssistant) -> None:
 async def test_user_form_error(
     hass: HomeAssistant, exception: Exception, error: str
 ) -> None:
-    """Test we handle connection errors."""
+    """Test the user step reports connection and unexpected errors."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}
     )
@@ -175,7 +175,7 @@ async def test_manual_form_creates_entry(hass: HomeAssistant) -> None:
 async def test_manual_form_error_handling(
     hass: HomeAssistant, exception: Exception, error: str
 ) -> None:
-    """Test creating entry with manual user input."""
+    """Test the manual step reports connection and unexpected errors."""
     result = await hass.config_entries.flow.async_init(
         DOMAIN, context={"source": SOURCE_USER}
     )
