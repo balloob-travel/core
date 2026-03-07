@@ -1,18 +1,21 @@
 """Tests for the Denon RS232 media player platform."""
 
-import pytest
+import json
+from pathlib import Path
 
 from denon_rs232 import InputSource, PowerState
+import pytest
 
+from homeassistant.components.denon_rs232.media_player import (
+    INPUT_SOURCE_DENON_TO_HA,
+    POWER_STATE_DENON_TO_HA,
+)
 from homeassistant.components.media_player import (
     ATTR_INPUT_SOURCE,
     ATTR_INPUT_SOURCE_LIST,
     ATTR_MEDIA_VOLUME_LEVEL,
     ATTR_MEDIA_VOLUME_MUTED,
-    ATTR_SOUND_MODE,
-    ATTR_SOUND_MODE_LIST,
     DOMAIN as MP_DOMAIN,
-    SERVICE_SELECT_SOUND_MODE,
     SERVICE_SELECT_SOURCE,
 )
 from homeassistant.const import (
@@ -30,13 +33,23 @@ from homeassistant.core import HomeAssistant
 
 from .conftest import _default_state
 
-ENTITY_ID = "media_player.denon_receiver"
+ENTITY_ID = "media_player.avr_3805_avc_3890"
+STRINGS_PATH = Path("homeassistant/components/denon_rs232/strings.json")
+
+
+def _translation_state_keys(attribute: str) -> set[str]:
+    """Return the translation keys declared for a state attribute."""
+    strings = json.loads(STRINGS_PATH.read_text())
+    return set(
+        strings["entity"]["media_player"]["receiver"]["state_attributes"][attribute][
+            "state"
+        ]
+    )
 
 
 @pytest.fixture(autouse=True)
 async def auto_init_components(init_components) -> None:
     """Set up the component."""
-    return None
 
 
 async def test_entity_created(hass: HomeAssistant) -> None:
@@ -115,19 +128,22 @@ async def test_source_list(hass: HomeAssistant) -> None:
     assert source_list == sorted(source_list)
 
 
-async def test_sound_mode(hass: HomeAssistant) -> None:
-    """Test surround mode is reported as sound mode."""
+async def test_sound_mode_not_exposed(hass: HomeAssistant) -> None:
+    """Test surround mode is not exposed in Home Assistant."""
     state = hass.states.get(ENTITY_ID)
-    assert state.attributes[ATTR_SOUND_MODE] == "stereo"
+    assert "sound_mode" not in state.attributes
+    assert "sound_mode_list" not in state.attributes
 
 
-async def test_sound_mode_list(hass: HomeAssistant) -> None:
-    """Test sound mode list comes from the model definition."""
-    state = hass.states.get(ENTITY_ID)
-    mode_list = state.attributes[ATTR_SOUND_MODE_LIST]
-    assert "direct" in mode_list
-    assert "stereo" in mode_list
-    assert "dolby_digital" in mode_list
+def test_input_source_translation_keys_cover_all_enum_members() -> None:
+    """Test all input sources have a declared translation key."""
+    assert set(INPUT_SOURCE_DENON_TO_HA) == set(InputSource)
+    assert set(INPUT_SOURCE_DENON_TO_HA.values()) == _translation_state_keys("source")
+
+
+def test_power_state_mapping_covers_all_values() -> None:
+    """Test all power states have a media player state mapping."""
+    assert set(POWER_STATE_DENON_TO_HA) == set(PowerState)
 
 
 async def test_turn_on(hass: HomeAssistant, mock_receiver) -> None:
@@ -241,15 +257,17 @@ async def test_select_source_bluetooth(hass: HomeAssistant, mock_receiver) -> No
     mock_receiver.select_input_source.assert_awaited_once_with(InputSource.BT)
 
 
-async def test_select_source_raw_value(hass: HomeAssistant, mock_receiver) -> None:
-    """Test selecting a raw protocol source value still works."""
+async def test_select_source_raw_value_is_ignored(
+    hass: HomeAssistant, mock_receiver
+) -> None:
+    """Test selecting a raw protocol source value does nothing."""
     await hass.services.async_call(
         MP_DOMAIN,
         SERVICE_SELECT_SOURCE,
         {ATTR_ENTITY_ID: ENTITY_ID, ATTR_INPUT_SOURCE: "DVD"},
         blocking=True,
     )
-    mock_receiver.select_input_source.assert_awaited_once_with(InputSource.DVD)
+    mock_receiver.select_input_source.assert_not_awaited()
 
 
 async def test_select_source_unknown(hass: HomeAssistant, mock_receiver) -> None:
@@ -263,43 +281,18 @@ async def test_select_source_unknown(hass: HomeAssistant, mock_receiver) -> None
     mock_receiver.select_input_source.assert_not_awaited()
 
 
-async def test_select_sound_mode(hass: HomeAssistant, mock_receiver) -> None:
-    """Test selecting sound mode."""
-    await hass.services.async_call(
-        MP_DOMAIN,
-        SERVICE_SELECT_SOUND_MODE,
-        {ATTR_ENTITY_ID: ENTITY_ID, ATTR_SOUND_MODE: "dolby_digital"},
-        blocking=True,
-    )
-    mock_receiver.set_surround_mode.assert_awaited_once_with("DOLBY DIGITAL")
-
-
-async def test_select_sound_mode_raw_value(
-    hass: HomeAssistant, mock_receiver
-) -> None:
-    """Test selecting a raw protocol sound mode value still works."""
-    await hass.services.async_call(
-        MP_DOMAIN,
-        SERVICE_SELECT_SOUND_MODE,
-        {ATTR_ENTITY_ID: ENTITY_ID, ATTR_SOUND_MODE: "DOLBY DIGITAL"},
-        blocking=True,
-    )
-    mock_receiver.set_surround_mode.assert_awaited_once_with("DOLBY DIGITAL")
-
-
 async def test_push_update(hass: HomeAssistant, mock_receiver) -> None:
     """Test state updates from the receiver via subscribe callback."""
     new_state = _default_state()
     new_state.volume = -20.0
     new_state.input_source = InputSource.DVD
-    new_state.surround_mode = "DOLBY DIGITAL"
 
     mock_receiver.mock_state(new_state)
     await hass.async_block_till_done()
 
     state = hass.states.get(ENTITY_ID)
     assert state.attributes[ATTR_INPUT_SOURCE] == "dvd"
-    assert state.attributes[ATTR_SOUND_MODE] == "dolby_digital"
+    assert "sound_mode" not in state.attributes
     expected_volume = ((-20.0) - (-80.0)) / 90.0
     assert abs(state.attributes[ATTR_MEDIA_VOLUME_LEVEL] - expected_volume) < 0.001
 

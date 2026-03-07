@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
 from denon_rs232 import (
     MIN_VOLUME_DB,
     VOLUME_DB_RANGE,
@@ -12,7 +10,6 @@ from denon_rs232 import (
     InputSource,
     PowerState,
 )
-from denon_rs232.models import MODELS
 
 from homeassistant.components.media_player import (
     MediaPlayerDeviceClass,
@@ -26,31 +23,55 @@ from homeassistant.helpers.entity_platform import AddConfigEntryEntitiesCallback
 
 from .const import DOMAIN, DenonRS232ConfigEntry
 
-PARALLEL_UPDATES = 1
-
-_INVALID_KEY_CHARS = re.compile(r"[^a-z0-9]+")
-
-
-def _source_state_key(source: InputSource) -> str:
-    """Return a translation-safe state key for a source."""
-    return source.name.lower()
-
-
-SOURCE_BY_NAME: dict[str, InputSource] = {
-    _source_state_key(source): source for source in InputSource
+POWER_STATE_DENON_TO_HA: dict[PowerState, MediaPlayerState] = {
+    PowerState.ON: MediaPlayerState.ON,
+    PowerState.STANDBY: MediaPlayerState.OFF,
 }
-# Backwards compatibility for direct service calls using raw protocol values.
-SOURCE_BY_NAME.update({source.value: source for source in InputSource})
 
-
-def _sound_mode_state_key(sound_mode: str) -> str:
-    """Return a translation-safe state key for a sound mode."""
-    key = _INVALID_KEY_CHARS.sub("_", sound_mode.replace("+", " plus ").lower()).strip(
-        "_"
-    )
-    if key and not key[0].isdigit():
-        return key
-    return f"mode_{key}"
+INPUT_SOURCE_DENON_TO_HA: dict[InputSource, str] = {
+    InputSource.PHONO: "phono",
+    InputSource.CD: "cd",
+    InputSource.TUNER: "tuner",
+    InputSource.DVD: "dvd",
+    InputSource.VDP: "vdp",
+    InputSource.TV: "tv",
+    InputSource.DBS_SAT: "dbs_sat",
+    InputSource.VCR_1: "vcr_1",
+    InputSource.VCR_2: "vcr_2",
+    InputSource.VCR_3: "vcr_3",
+    InputSource.V_AUX: "v_aux",
+    InputSource.CDR_TAPE1: "cdr_tape1",
+    InputSource.MD_TAPE2: "md_tape2",
+    InputSource.HDP: "hdp",
+    InputSource.DVR: "dvr",
+    InputSource.TV_CBL: "tv_cbl",
+    InputSource.SAT: "sat",
+    InputSource.NET_USB: "net_usb",
+    InputSource.DOCK: "dock",
+    InputSource.IPOD: "ipod",
+    InputSource.BD: "bd",
+    InputSource.SAT_CBL: "sat_cbl",
+    InputSource.MPLAY: "mplay",
+    InputSource.GAME: "game",
+    InputSource.AUX1: "aux1",
+    InputSource.AUX2: "aux2",
+    InputSource.NET: "net",
+    InputSource.BT: "bt",
+    InputSource.USB_IPOD: "usb_ipod",
+    InputSource.EIGHT_K: "eight_k",
+    InputSource.PANDORA: "pandora",
+    InputSource.SIRIUSXM: "siriusxm",
+    InputSource.SPOTIFY: "spotify",
+    InputSource.FLICKR: "flickr",
+    InputSource.IRADIO: "iradio",
+    InputSource.SERVER: "server",
+    InputSource.FAVORITES: "favorites",
+    InputSource.LASTFM: "lastfm",
+    InputSource.XM: "xm",
+    InputSource.SIRIUS: "sirius",
+    InputSource.HDRADIO: "hdradio",
+    InputSource.DAB: "dab",
+}
 
 
 async def async_setup_entry(
@@ -74,7 +95,6 @@ class DenonRS232MediaPlayer(MediaPlayerEntity):
         | MediaPlayerEntityFeature.VOLUME_MUTE
         | MediaPlayerEntityFeature.VOLUME_STEP
         | MediaPlayerEntityFeature.SELECT_SOURCE
-        | MediaPlayerEntityFeature.SELECT_SOUND_MODE
     )
     _attr_has_entity_name = True
     _attr_name = None
@@ -96,37 +116,17 @@ class DenonRS232MediaPlayer(MediaPlayerEntity):
             identifiers={(DOMAIN, config_entry.entry_id)},
             manufacturer="Denon",
             model=model_name,
-            name="Denon Receiver",
+            name=config_entry.title,
         )
-
-        known_sound_modes = (
-            model.surround_modes
-            if model
-            else tuple(
-                sorted(
-                    {
-                        surround_mode
-                        for receiver_model in MODELS.values()
-                        for surround_mode in receiver_model.surround_modes
-                    }
-                )
-            )
-        )
-        self._sound_mode_by_state: dict[str, str] = {
-            _sound_mode_state_key(sound_mode): sound_mode
-            for sound_mode in known_sound_modes
-        }
 
         if model:
             self._attr_source_list = sorted(
-                _source_state_key(source) for source in model.input_sources
+                INPUT_SOURCE_DENON_TO_HA[source] for source in model.input_sources
             )
-            self._attr_sound_mode_list = list(self._sound_mode_by_state)
         else:
             self._attr_source_list = sorted(
-                _source_state_key(source) for source in InputSource
+                INPUT_SOURCE_DENON_TO_HA[source] for source in InputSource
             )
-            self._attr_sound_mode_list = list(self._sound_mode_by_state)
 
         self._volume_min = MIN_VOLUME_DB
         self._volume_range = VOLUME_DB_RANGE
@@ -149,22 +149,15 @@ class DenonRS232MediaPlayer(MediaPlayerEntity):
     @callback
     def _async_update_from_state(self, state: DenonState) -> None:
         """Update entity attributes from a DenonState snapshot."""
-        if state.power == PowerState.ON:
-            self._attr_state = MediaPlayerState.ON
-        elif state.power == PowerState.STANDBY:
-            self._attr_state = MediaPlayerState.OFF
-        else:
-            self._attr_state = None
+        self._attr_state = POWER_STATE_DENON_TO_HA.get(state.power)
+        self._attr_source = INPUT_SOURCE_DENON_TO_HA.get(state.input_source)
+        self._attr_is_volume_muted = state.mute
 
         if state.volume_min is not None:
             self._volume_min = state.volume_min
 
-        if (
-            state.volume_min is not None
-            and state.volume_max is not None
-            and state.volume_max > state.volume_min
-        ):
-            self._volume_range = state.volume_max - state.volume_min
+            if state.volume_max is not None and state.volume_max > state.volume_min:
+                self._volume_range = state.volume_max - state.volume_min
 
         if state.volume is not None:
             self._attr_volume_level = (
@@ -172,18 +165,6 @@ class DenonRS232MediaPlayer(MediaPlayerEntity):
             ) / self._volume_range
         else:
             self._attr_volume_level = None
-
-        self._attr_is_volume_muted = state.mute
-
-        if state.input_source is not None:
-            self._attr_source = _source_state_key(state.input_source)
-        else:
-            self._attr_source = None
-
-        if state.surround_mode is not None:
-            self._attr_sound_mode = _sound_mode_state_key(state.surround_mode)
-        else:
-            self._attr_sound_mode = None
 
     async def async_turn_on(self) -> None:
         """Turn the receiver on."""
@@ -215,11 +196,7 @@ class DenonRS232MediaPlayer(MediaPlayerEntity):
 
     async def async_select_source(self, source: str) -> None:
         """Select input source."""
-        if input_source := SOURCE_BY_NAME.get(source):
-            await self._receiver.select_input_source(input_source)
-
-    async def async_select_sound_mode(self, sound_mode: str) -> None:
-        """Select sound mode."""
-        await self._receiver.set_surround_mode(
-            self._sound_mode_by_state.get(sound_mode, sound_mode)
-        )
+        for input_source, ha_source in INPUT_SOURCE_DENON_TO_HA.items():
+            if ha_source == source:
+                await self._receiver.select_input_source(input_source)
+                break

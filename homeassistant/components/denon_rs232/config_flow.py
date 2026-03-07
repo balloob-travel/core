@@ -44,7 +44,7 @@ class DenonRS232ConfigFlow(ConfigFlow, domain=DOMAIN):
             receiver = DenonReceiver(user_input[CONF_DEVICE], model=model)
             try:
                 await receiver.connect()
-            except (ConnectionError, OSError):
+            except ConnectionError, OSError:
                 errors["base"] = "cannot_connect"
             except Exception:  # noqa: BLE001
                 LOGGER.exception("Unexpected exception")
@@ -87,7 +87,7 @@ class DenonRS232ConfigFlow(ConfigFlow, domain=DOMAIN):
 
             try:
                 await receiver.connect()
-            except (ConnectionError, OSError):
+            except ConnectionError, OSError:
                 errors["base"] = "cannot_connect"
             except Exception:  # noqa: BLE001
                 LOGGER.exception("Unexpected exception")
