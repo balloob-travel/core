@@ -351,7 +351,7 @@ async def test_follower_routes_commands_and_reads_leader_metadata(
     mock_wiim_controller: MagicMock,
     init_wiim_media_player,
 ) -> None:
-    """Test follower commands are routed to the leader device."""
+    """Test the library handles follower routing transparently for HA."""
     leader_device = type(mock_wiim_device)(
         udn="uuid:leader-1234",
         name="Leader WiiM Device",
@@ -381,6 +381,11 @@ async def test_follower_routes_commands_and_reads_leader_metadata(
     mock_wiim_controller.get_device.side_effect = lambda udn: (
         leader_device if udn == leader_device.udn else mock_wiim_device
     )
+    mock_wiim_device.async_play.side_effect = leader_device.async_play
+    mock_wiim_device.async_seek.side_effect = leader_device.async_seek
+    mock_wiim_device.async_get_transport_capabilities.side_effect = (
+        leader_device.async_get_transport_capabilities
+    )
 
     await hass.services.async_call(
         MEDIA_PLAYER_DOMAIN,
@@ -388,8 +393,8 @@ async def test_follower_routes_commands_and_reads_leader_metadata(
         {ATTR_ENTITY_ID: WIIM_ENTITY_ID},
         blocking=True,
     )
+    mock_wiim_device.async_play.assert_awaited_once()
     leader_device.async_play.assert_awaited_once()
-    mock_wiim_device.async_play.assert_not_awaited()
 
     await hass.services.async_call(
         MEDIA_PLAYER_DOMAIN,
@@ -397,8 +402,8 @@ async def test_follower_routes_commands_and_reads_leader_metadata(
         {ATTR_ENTITY_ID: WIIM_ENTITY_ID, "seek_position": 90},
         blocking=True,
     )
+    mock_wiim_device.async_seek.assert_awaited_once_with(90)
     leader_device.async_seek.assert_awaited_once_with(90)
-    mock_wiim_device.async_seek.assert_not_awaited()
 
     leader_device.playing_status = PlayingStatus.PLAYING
     leader_device.play_mode = "Spotify"

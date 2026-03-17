@@ -10,7 +10,6 @@ from async_upnp_client.client import UpnpService, UpnpStateVariable
 from wiim.consts import PlayingStatus as SDKPlayingStatus
 from wiim.exceptions import WiimDeviceException, WiimException, WiimRequestException
 from wiim.models import (
-    WiimGroupRole,
     WiimGroupSnapshot,
     WiimRepeatMode,
     WiimTransportCapabilities,
@@ -169,15 +168,6 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
         """Return the typed group snapshot for the current device."""
         return self._wiim_data.controller.get_group_snapshot(self._device.udn)
 
-    @property
-    def _metadata_device(self) -> WiimDevice:
-        """Return the device whose metadata should back this entity."""
-        group_snapshot = self._get_group_snapshot()
-        if group_snapshot.role != WiimGroupRole.FOLLOWER:
-            return self._device
-
-        return self._wiim_data.controller.get_device(group_snapshot.leader_udn)
-
     @callback
     def _clear_media_metadata(self) -> None:
         """Clear media metadata attributes."""
@@ -192,25 +182,6 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
         self._attr_media_position_updated_at = None
 
     @callback
-    def _get_command_target_device(self, action_name: str) -> WiimDevice:
-        """Return the device that should receive a grouped playback command."""
-        group_snapshot = self._get_group_snapshot()
-        if group_snapshot.role != WiimGroupRole.FOLLOWER:
-            return self._device
-
-        target_device = self._wiim_data.controller.get_device(
-            group_snapshot.command_target_udn
-        )
-
-        LOGGER.info(
-            "Routing %s command from follower %s to leader %s",
-            action_name,
-            self.entity_id,
-            target_device.udn,
-        )
-        return target_device
-
-    @callback
     def _update_ha_state_from_sdk_cache(
         self,
         *,
@@ -220,7 +191,6 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
         """Update HA state from SDK's cache/HTTP poll attributes.
 
         This is the main method for updating this entity's HA attributes.
-        Crucially, it also handles propagating metadata to followers if this is a leader.
         """
         LOGGER.debug(
             "Device %s: Updating HA state from SDK cache/HTTP poll",
@@ -245,27 +215,19 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
         # Determine current group role (leader/follower/standalone)
         group_snapshot = self._get_group_snapshot()
 
-        metadata_device = self._metadata_device
-        if group_snapshot.role == WiimGroupRole.FOLLOWER:
-            LOGGER.debug(
-                "Follower %s: Actively pulling metadata from leader %s",
-                self.entity_id,
-                metadata_device.udn,
-            )
-
-        if metadata_device.playing_status is not None:
+        if self._device.playing_status is not None:
             self._attr_state = SDK_TO_HA_STATE.get(
-                metadata_device.playing_status, MediaPlayerState.IDLE
+                self._device.playing_status, MediaPlayerState.IDLE
             )
 
-        if metadata_device.play_mode is not None:
-            self._attr_source = metadata_device.play_mode
+        if self._device.play_mode is not None:
+            self._attr_source = self._device.play_mode
 
-        loop_state = metadata_device.loop_state
+        loop_state = self._device.loop_state
         self._attr_repeat = RepeatMode(loop_state.repeat)
         self._attr_shuffle = loop_state.shuffle
 
-        if media := metadata_device.current_media:
+        if media := self._device.current_media:
             self._attr_media_title = media.title
             self._attr_media_artist = media.artist
             self._attr_media_album_name = media.album
@@ -310,10 +272,11 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
             return
 
         async def _wrapped() -> None:
-            await self._device.ensure_subscriptions()
+            if device is self._device:
+                await self._device.ensure_subscriptions()
             self._update_ha_state_from_sdk_cache()
 
-        if self._device.supports_http_api:
+        if device is self._device and self._device.supports_http_api:
             self._entry.async_create_background_task(
                 self.hass,
                 _wrapped(),
@@ -409,11 +372,10 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
 
         This method is asynchronous and makes a network call.
         """
-        metadata_device = self._metadata_device
         previous_capabilities = self._transport_capabilities
         if (
             transport_capabilities
-            := await self._async_get_transport_capabilities_for_device(metadata_device)
+            := await self._async_get_transport_capabilities_for_device(self._device)
         ) is not None:
             if self._transport_capabilities != transport_capabilities:
                 self._transport_capabilities = transport_capabilities
@@ -422,13 +384,10 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
                     self.entity_id,
                     transport_capabilities,
                 )
-        elif (
-            metadata_device is not self._device
-            and self._transport_capabilities is not None
-        ):
+        elif self._transport_capabilities is not None:
             self._transport_capabilities = None
             LOGGER.debug(
-                "Device %s: Follower transport capabilities unavailable, using base features",
+                "Device %s: Transport capabilities unavailable, using base features",
                 self.entity_id,
             )
 
@@ -538,34 +497,33 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
     @media_player_exception_wrap
     async def async_media_play(self) -> None:
         """Send play command."""
-        await self._get_command_target_device("media_play").async_play()
+        await self._device.async_play()
 
     @media_player_exception_wrap
     async def async_media_pause(self) -> None:
         """Send pause command."""
-        target_device = self._get_command_target_device("media_pause")
-        await target_device.async_pause()
-        await target_device.sync_device_duration_and_position()
+        await self._device.async_pause()
+        await self._device.sync_device_duration_and_position()
 
     @media_player_exception_wrap
     async def async_media_stop(self) -> None:
         """Send stop command."""
-        await self._get_command_target_device("media_stop").async_stop()
+        await self._device.async_stop()
 
     @media_player_exception_wrap
     async def async_media_next_track(self) -> None:
         """Send next track command."""
-        await self._get_command_target_device("media_next_track").async_next()
+        await self._device.async_next()
 
     @media_player_exception_wrap
     async def async_media_previous_track(self) -> None:
         """Send previous track command."""
-        await self._get_command_target_device("media_previous_track").async_previous()
+        await self._device.async_previous()
 
     @media_player_exception_wrap
     async def async_media_seek(self, position: float) -> None:
         """Seek to a specific position in the track."""
-        await self._get_command_target_device("media_seek").async_seek(int(position))
+        await self._device.async_seek(int(position))
 
     @media_player_exception_wrap
     async def async_play_media(
@@ -575,10 +533,9 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
         LOGGER.debug(
             "async_play_media: type=%s, id=%s, kwargs=%s", media_type, media_id, kwargs
         )
-        target_device = self._get_command_target_device("play_media")
 
         if media_source.is_media_source_id(media_id):
-            if not target_device.supports_http_api:
+            if not self._device.supports_http_api:
                 raise ServiceValidationError(
                     "Media sources are not supported on this device"
                 )
@@ -589,14 +546,14 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
 
             url = async_process_play_media_url(self.hass, media_id)
             LOGGER.debug("HTTP media_type for play_media: %s", url)
-            await target_device.play_url(url)
+            await self._device.play_url(url)
             self._attr_state = MediaPlayerState.PLAYING
         elif media_type in {MediaType.MUSIC, MEDIA_TYPE_WIIM_LIBRARY}:
             if not media_id.isdigit():
                 raise ServiceValidationError(f"Invalid preset ID: {media_id}")
 
             preset_number = int(media_id)
-            await target_device.play_preset(preset_number)
+            await self._device.play_preset(preset_number)
             self._attr_media_content_id = f"wiim_preset_{preset_number}"
             self._attr_media_content_type = MediaType.PLAYLIST
             self._attr_state = MediaPlayerState.PLAYING
@@ -607,7 +564,7 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
                 )
 
             track_index = int(media_id)
-            await target_device.async_play_queue_with_index(track_index)
+            await self._device.async_play_queue_with_index(track_index)
             self._attr_media_content_id = f"wiim_track_{track_index}"
             self._attr_media_content_type = MediaType.TRACK
             self._attr_state = MediaPlayerState.PLAYING

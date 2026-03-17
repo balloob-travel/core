@@ -58,10 +58,10 @@ class MockWiimDevice:
         self.model = "WiiM Pro"
         self.volume = 50
         self.is_muted = False
-        self.supports_http_api = False
-        self.playing_status = PlayingStatus.STOPPED
+        self._supports_http_api = False
+        self._playing_status = PlayingStatus.STOPPED
         self.loop_mode = LoopMode.SHUFFLE_DISABLE_REPEAT_NONE
-        self.loop_state = WiimLoopState(
+        self._loop_state = WiimLoopState(
             repeat=WiimRepeatMode.OFF,
             shuffle=False,
         )
@@ -69,9 +69,9 @@ class MockWiimDevice:
         self.audio_output_hw_mode = AudioOutputHwMode.SPEAKER_OUT.display_name  # type: ignore[attr-defined]
         self.mac_address = "AA:BB:CC:DD:EE:FF"
         self.current_track_info = {}
-        self.current_media = None
+        self._current_media = None
         self.current_track_duration = 0
-        self.play_mode = "Network"
+        self._play_mode = "Network"
         self.equalizer_mode = ""
         self.current_position = 0
         self.next_track_uri = ""
@@ -83,11 +83,12 @@ class MockWiimDevice:
         self._device_info_properties = ""
         self._player_properties = ""
         self._manufacturer = "Linkplay Tech"
-        self.output_mode = "speaker"
-        self.supported_input_modes = (InputMode.LINE_IN.display_name,)  # type: ignore[attr-defined]
-        self.supported_output_modes = (
+        self._output_mode = "speaker"
+        self._supported_input_modes = (InputMode.LINE_IN.display_name,)  # type: ignore[attr-defined]
+        self._supported_output_modes = (
             AudioOutputHwMode.SPEAKER_OUT.display_name,  # type: ignore[attr-defined]
         )
+        self._controller = None
 
         self.upnp_device = MagicMock()
         self.upnp_device.udn = self.udn
@@ -148,6 +149,154 @@ class MockWiimDevice:
         self.build_loop_mode = MagicMock(
             return_value=LoopMode.SHUFFLE_DISABLE_REPEAT_NONE
         )
+
+    def attach_controller(self, controller: MagicMock | None) -> None:
+        """Attach the mocked controller for grouped behavior."""
+        self._controller = controller
+
+    def _get_group_snapshot(self) -> WiimGroupSnapshot:
+        """Return the current group snapshot for this mock device."""
+        if self._controller is None:
+            return WiimGroupSnapshot(
+                role=WiimGroupRole.STANDALONE,
+                leader_udn=self.udn,
+                member_udns=(self.udn,),
+            )
+
+        try:
+            return self._controller.get_group_snapshot(self.udn)
+        except Exception:
+            return WiimGroupSnapshot(
+                role=WiimGroupRole.STANDALONE,
+                leader_udn=self.udn,
+                member_udns=(self.udn,),
+            )
+
+    def _state_source_device(self) -> MockWiimDevice:
+        """Return the grouped device backing state reads."""
+        snapshot = self._get_group_snapshot()
+        if snapshot.role != WiimGroupRole.FOLLOWER or self._controller is None:
+            return self
+
+        try:
+            return self._controller.get_device(snapshot.leader_udn)
+        except Exception:
+            return self
+
+    def _command_target_device(self) -> MockWiimDevice:
+        """Return the grouped device backing command/capability reads."""
+        snapshot = self._get_group_snapshot()
+        if snapshot.role != WiimGroupRole.FOLLOWER or self._controller is None:
+            return self
+
+        try:
+            return self._controller.get_device(snapshot.command_target_udn)
+        except Exception:
+            return self
+
+    @property
+    def supports_http_api(self) -> bool:
+        """Return grouped HTTP API support."""
+        target_device = self._command_target_device()
+        if target_device is not self:
+            return target_device.supports_http_api
+        return self._supports_http_api
+
+    @supports_http_api.setter
+    def supports_http_api(self, value: bool) -> None:
+        """Set local HTTP API support."""
+        self._supports_http_api = value
+
+    @property
+    def playing_status(self) -> PlayingStatus:
+        """Return grouped playing status."""
+        state_device = self._state_source_device()
+        if state_device is not self:
+            return state_device.playing_status
+        return self._playing_status
+
+    @playing_status.setter
+    def playing_status(self, value: PlayingStatus) -> None:
+        """Set local playing status."""
+        self._playing_status = value
+
+    @property
+    def play_mode(self) -> str:
+        """Return grouped play mode."""
+        state_device = self._state_source_device()
+        if state_device is not self:
+            return state_device.play_mode
+        return self._play_mode
+
+    @play_mode.setter
+    def play_mode(self, value: str) -> None:
+        """Set local play mode."""
+        self._play_mode = value
+
+    @property
+    def output_mode(self) -> str:
+        """Return grouped output mode."""
+        state_device = self._state_source_device()
+        if state_device is not self:
+            return state_device.output_mode
+        return self._output_mode
+
+    @output_mode.setter
+    def output_mode(self, value: str) -> None:
+        """Set local output mode."""
+        self._output_mode = value
+
+    @property
+    def loop_state(self) -> WiimLoopState:
+        """Return grouped loop state."""
+        state_device = self._state_source_device()
+        if state_device is not self:
+            return state_device.loop_state
+        return self._loop_state
+
+    @loop_state.setter
+    def loop_state(self, value: WiimLoopState) -> None:
+        """Set local loop state."""
+        self._loop_state = value
+
+    @property
+    def current_media(self):
+        """Return grouped current media."""
+        state_device = self._state_source_device()
+        if state_device is not self:
+            return state_device.current_media
+        return self._current_media
+
+    @current_media.setter
+    def current_media(self, value) -> None:
+        """Set local current media."""
+        self._current_media = value
+
+    @property
+    def supported_input_modes(self) -> tuple[str, ...]:
+        """Return grouped supported input modes."""
+        target_device = self._command_target_device()
+        if target_device is not self:
+            return target_device.supported_input_modes
+        return self._supported_input_modes
+
+    @supported_input_modes.setter
+    def supported_input_modes(self, value: tuple[str, ...]) -> None:
+        """Set local supported input modes."""
+        self._supported_input_modes = value
+
+    @property
+    def supported_output_modes(self) -> tuple[str, ...]:
+        """Return grouped supported output modes."""
+        target_device = self._command_target_device()
+        if target_device is not self:
+            return target_device.supported_output_modes
+        return self._supported_output_modes
+
+    @supported_output_modes.setter
+    def supported_output_modes(self, value: tuple[str, ...]) -> None:
+        """Set local supported output modes."""
+        self._supported_output_modes = value
 
     async def fire_general_update(self, hass: HomeAssistant) -> None:
         """Trigger the registered general update callback."""
@@ -260,7 +409,9 @@ def mock_wiim_api_endpoint():
 def mock_wiim_controller(mock_wiim_device: MockWiimDevice):
     """Mock a WiimController instance."""
     controller = MagicMock()
-    controller.add_device = AsyncMock()
+    controller.add_device = AsyncMock(
+        side_effect=lambda device: device.attach_controller(controller)
+    )
     controller.disconnect = AsyncMock()
     controller.remove_device = AsyncMock()
     controller.async_update_all_multiroom_status = AsyncMock()
@@ -282,6 +433,7 @@ async def init_wiim_media_player(
 ) -> None:
     """Set up the WiiM integration."""
     mock_config_entry.add_to_hass(hass)
+    mock_wiim_device.attach_controller(mock_wiim_controller)
 
     with (
         patch(
