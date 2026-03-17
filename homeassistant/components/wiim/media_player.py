@@ -255,12 +255,12 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
             self.async_write_ha_state()
 
     @callback
-    def _handle_sdk_general_device_update(self, device: WiimDevice) -> None:
+    def _handle_sdk_general_device_update(self, _device: WiimDevice) -> None:
         """Handle general updates from the SDK (e.g., availability, polled data)."""
         LOGGER.debug(
             "Device %s: Received general SDK update from %s",
             self.entity_id,
-            device.name,
+            self._device.name,
         )
         if not self._device.available:
             self._update_ha_state_from_sdk_cache()
@@ -341,23 +341,23 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
         )
         self._update_ha_state_from_sdk_cache()
 
-    async def _async_get_transport_capabilities_for_device(
-        self, device: WiimDevice
+    async def _async_get_transport_capabilities(
+        self,
     ) -> WiimTransportCapabilities | None:
-        """Return transport capabilities for a device."""
+        """Return transport capabilities for the entity device."""
         try:
-            return await device.async_get_transport_capabilities()
+            return await self._device.async_get_transport_capabilities()
         except WiimRequestException as err:
             LOGGER.warning(
                 "Device %s: Failed to fetch transport capabilities: %s",
-                device.udn,
+                self._device.udn,
                 err,
             )
             return None
         except RuntimeError as err:
             LOGGER.error(
                 "Device %s: Unexpected error in transport capability detection: %s",
-                device.udn,
+                self._device.udn,
                 err,
             )
             return None
@@ -372,7 +372,7 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
         previous_capabilities = self._transport_capabilities
         if (
             transport_capabilities
-            := await self._async_get_transport_capabilities_for_device(self._device)
+            := await self._async_get_transport_capabilities()
         ) is not None:
             if self._transport_capabilities != transport_capabilities:
                 self._transport_capabilities = transport_capabilities
