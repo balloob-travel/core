@@ -233,6 +233,7 @@ class MockWiimDevice:
     ) -> None:
         """Trigger the registered AVTransport callback."""
         assert self.av_transport_event_callback is not None
+        self._playing_status = transport_state
         self.event_data = {"TransportState": transport_state.value}
         self.av_transport_event_callback(MagicMock(), [])
         await hass.async_block_till_done()

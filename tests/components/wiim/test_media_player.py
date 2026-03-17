@@ -463,6 +463,9 @@ async def test_follower_routes_repeat_shuffle_and_source_commands_to_leader(
     mock_wiim_device.async_set_play_mode.side_effect = (
         leader_device.async_set_play_mode
     )
+    mock_wiim_device.async_get_transport_capabilities.side_effect = (
+        leader_device.async_get_transport_capabilities
+    )
 
     await mock_wiim_device.fire_general_update(hass)
 
