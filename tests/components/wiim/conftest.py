@@ -85,7 +85,13 @@ class MockWiimDevice:
         self._supported_output_modes = (
             AudioOutputHwMode.SPEAKER_OUT.display_name,  # type: ignore[attr-defined]
         )
-        self._controller = None
+        self._controller = MagicMock()
+        self._controller.get_group_snapshot.return_value = WiimGroupSnapshot(
+            role=WiimGroupRole.STANDALONE,
+            leader_udn=self.udn,
+            member_udns=(self.udn,),
+        )
+        self._controller.get_device.side_effect = lambda _udn: self
 
         self.upnp_device = MagicMock()
         self.upnp_device.udn = self.udn
@@ -149,111 +155,70 @@ class MockWiimDevice:
 
     def attach_controller(self, controller: MagicMock | None) -> None:
         """Attach the mocked controller for grouped behavior."""
-        self._controller = controller
-
-    def _get_group_snapshot(self) -> WiimGroupSnapshot:
-        """Return the current group snapshot for this mock device."""
-        if self._controller is None:
-            return WiimGroupSnapshot(
-                role=WiimGroupRole.STANDALONE,
-                leader_udn=self.udn,
-                member_udns=(self.udn,),
-            )
-
-        try:
-            return self._controller.get_group_snapshot(self.udn)
-        except Exception:
-            return WiimGroupSnapshot(
-                role=WiimGroupRole.STANDALONE,
-                leader_udn=self.udn,
-                member_udns=(self.udn,),
-            )
+        self._controller = controller or self._controller
 
     def _state_source_device(self) -> MockWiimDevice:
         """Return the grouped device backing state reads."""
-        snapshot = self._get_group_snapshot()
-        if snapshot.role != WiimGroupRole.FOLLOWER or self._controller is None:
+        snapshot = self._controller.get_group_snapshot(self.udn)
+        if snapshot.role != WiimGroupRole.FOLLOWER:
             return self
-
-        try:
-            return self._controller.get_device(snapshot.leader_udn)
-        except Exception:
-            return self
+        return self._controller.get_device(snapshot.leader_udn)
 
     def _command_target_device(self) -> MockWiimDevice:
         """Return the grouped device backing command/capability reads."""
-        snapshot = self._get_group_snapshot()
-        if snapshot.role != WiimGroupRole.FOLLOWER or self._controller is None:
+        snapshot = self._controller.get_group_snapshot(self.udn)
+        if snapshot.role != WiimGroupRole.FOLLOWER:
             return self
+        return self._controller.get_device(snapshot.command_target_udn)
 
-        try:
-            return self._controller.get_device(snapshot.command_target_udn)
-        except Exception:
-            return self
+    def _grouped_value(self, attr: str, *, for_commands: bool = False):
+        """Return a grouped attribute from the effective state or command device."""
+        device = (
+            self._command_target_device()
+            if for_commands
+            else self._state_source_device()
+        )
+        return getattr(device, attr)
 
     @property
     def supports_http_api(self) -> bool:
         """Return grouped HTTP API support."""
-        target_device = self._command_target_device()
-        if target_device is not self:
-            return target_device.supports_http_api
-        return self._supports_http_api
+        return self._grouped_value("_supports_http_api", for_commands=True)
 
     @property
     def playing_status(self) -> PlayingStatus:
         """Return grouped playing status."""
-        state_device = self._state_source_device()
-        if state_device is not self:
-            return state_device.playing_status
-        return self._playing_status
+        return self._grouped_value("_playing_status")
 
     @property
     def play_mode(self) -> str:
         """Return grouped play mode."""
-        state_device = self._state_source_device()
-        if state_device is not self:
-            return state_device.play_mode
-        return self._play_mode
+        return self._grouped_value("_play_mode")
 
     @property
     def output_mode(self) -> str:
         """Return grouped output mode."""
-        state_device = self._state_source_device()
-        if state_device is not self:
-            return state_device.output_mode
-        return self._output_mode
+        return self._grouped_value("_output_mode")
 
     @property
     def loop_state(self) -> WiimLoopState:
         """Return grouped loop state."""
-        state_device = self._state_source_device()
-        if state_device is not self:
-            return state_device.loop_state
-        return self._loop_state
+        return self._grouped_value("_loop_state")
 
     @property
     def current_media(self):
         """Return grouped current media."""
-        state_device = self._state_source_device()
-        if state_device is not self:
-            return state_device.current_media
-        return self._current_media
+        return self._grouped_value("_current_media")
 
     @property
     def supported_input_modes(self) -> tuple[str, ...]:
         """Return grouped supported input modes."""
-        target_device = self._command_target_device()
-        if target_device is not self:
-            return target_device.supported_input_modes
-        return self._supported_input_modes
+        return self._grouped_value("_supported_input_modes", for_commands=True)
 
     @property
     def supported_output_modes(self) -> tuple[str, ...]:
         """Return grouped supported output modes."""
-        target_device = self._command_target_device()
-        if target_device is not self:
-            return target_device.supported_output_modes
-        return self._supported_output_modes
+        return self._grouped_value("_supported_output_modes", for_commands=True)
 
     async def fire_general_update(self, hass: HomeAssistant) -> None:
         """Trigger the registered general update callback."""
