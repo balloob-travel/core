@@ -272,18 +272,14 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
             return
 
         async def _wrapped() -> None:
-            if device is self._device:
-                await self._device.ensure_subscriptions()
+            await self._device.ensure_subscriptions()
             self._update_ha_state_from_sdk_cache()
 
-        if device is self._device and self._device.supports_http_api:
-            self._entry.async_create_background_task(
-                self.hass,
-                _wrapped(),
-                name=f"wiim_{self.entity_id}_general_update",
-            )
-        else:
-            self._update_ha_state_from_sdk_cache()
+        self._entry.async_create_background_task(
+            self.hass,
+            _wrapped(),
+            name=f"wiim_{self.entity_id}_general_update",
+        )
 
     @callback
     def _handle_sdk_av_transport_event(

@@ -103,6 +103,7 @@ async def test_state_machine_updates_from_device_callbacks(
     )
 
     await mock_wiim_device.fire_general_update(hass)
+    mock_wiim_device.ensure_subscriptions.assert_awaited_once()
 
     state = hass.states.get(WIIM_ENTITY_ID)
     assert state.state == MediaPlayerState.PLAYING
