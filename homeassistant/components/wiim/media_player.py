@@ -287,8 +287,7 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
     ) -> None:
         """Handle AVTransport events from the SDK.
 
-        The SDK updates its own device state before invoking this callback.
-        This handler only refreshes the HA entity state.
+        This handler refreshes the HA entity state.
         """
 
         LOGGER.debug(
@@ -371,8 +370,7 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
         """
         previous_capabilities = self._transport_capabilities
         if (
-            transport_capabilities
-            := await self._async_get_transport_capabilities()
+            transport_capabilities := await self._async_get_transport_capabilities()
         ) is not None:
             if self._transport_capabilities != transport_capabilities:
                 self._transport_capabilities = transport_capabilities
