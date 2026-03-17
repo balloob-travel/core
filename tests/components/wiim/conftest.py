@@ -60,7 +60,7 @@ class MockWiimDevice:
         self.is_muted = False
         self._supports_http_api = False
         self._playing_status = PlayingStatus.STOPPED
-        self.loop_mode = LoopMode.SHUFFLE_DISABLE_REPEAT_NONE
+        self._loop_mode = LoopMode.SHUFFLE_DISABLE_REPEAT_NONE
         self._loop_state = WiimLoopState(
             repeat=WiimRepeatMode.OFF,
             shuffle=False,
@@ -68,12 +68,9 @@ class MockWiimDevice:
         self.input_mode = InputMode.LINE_IN
         self.audio_output_hw_mode = AudioOutputHwMode.SPEAKER_OUT.display_name  # type: ignore[attr-defined]
         self.mac_address = "AA:BB:CC:DD:EE:FF"
-        self.current_track_info = {}
         self._current_media = None
-        self.current_track_duration = 0
         self._play_mode = "Network"
         self.equalizer_mode = ""
-        self.current_position = 0
         self.next_track_uri = ""
         self.event_data: dict[str, str] = {}
         self.general_event_callback = None
@@ -202,11 +199,6 @@ class MockWiimDevice:
             return target_device.supports_http_api
         return self._supports_http_api
 
-    @supports_http_api.setter
-    def supports_http_api(self, value: bool) -> None:
-        """Set local HTTP API support."""
-        self._supports_http_api = value
-
     @property
     def playing_status(self) -> PlayingStatus:
         """Return grouped playing status."""
@@ -214,11 +206,6 @@ class MockWiimDevice:
         if state_device is not self:
             return state_device.playing_status
         return self._playing_status
-
-    @playing_status.setter
-    def playing_status(self, value: PlayingStatus) -> None:
-        """Set local playing status."""
-        self._playing_status = value
 
     @property
     def play_mode(self) -> str:
@@ -228,11 +215,6 @@ class MockWiimDevice:
             return state_device.play_mode
         return self._play_mode
 
-    @play_mode.setter
-    def play_mode(self, value: str) -> None:
-        """Set local play mode."""
-        self._play_mode = value
-
     @property
     def output_mode(self) -> str:
         """Return grouped output mode."""
@@ -240,11 +222,6 @@ class MockWiimDevice:
         if state_device is not self:
             return state_device.output_mode
         return self._output_mode
-
-    @output_mode.setter
-    def output_mode(self, value: str) -> None:
-        """Set local output mode."""
-        self._output_mode = value
 
     @property
     def loop_state(self) -> WiimLoopState:
@@ -254,11 +231,6 @@ class MockWiimDevice:
             return state_device.loop_state
         return self._loop_state
 
-    @loop_state.setter
-    def loop_state(self, value: WiimLoopState) -> None:
-        """Set local loop state."""
-        self._loop_state = value
-
     @property
     def current_media(self):
         """Return grouped current media."""
@@ -266,11 +238,6 @@ class MockWiimDevice:
         if state_device is not self:
             return state_device.current_media
         return self._current_media
-
-    @current_media.setter
-    def current_media(self, value) -> None:
-        """Set local current media."""
-        self._current_media = value
 
     @property
     def supported_input_modes(self) -> tuple[str, ...]:
@@ -280,11 +247,6 @@ class MockWiimDevice:
             return target_device.supported_input_modes
         return self._supported_input_modes
 
-    @supported_input_modes.setter
-    def supported_input_modes(self, value: tuple[str, ...]) -> None:
-        """Set local supported input modes."""
-        self._supported_input_modes = value
-
     @property
     def supported_output_modes(self) -> tuple[str, ...]:
         """Return grouped supported output modes."""
@@ -292,11 +254,6 @@ class MockWiimDevice:
         if target_device is not self:
             return target_device.supported_output_modes
         return self._supported_output_modes
-
-    @supported_output_modes.setter
-    def supported_output_modes(self, value: tuple[str, ...]) -> None:
-        """Set local supported output modes."""
-        self._supported_output_modes = value
 
     async def fire_general_update(self, hass: HomeAssistant) -> None:
         """Trigger the registered general update callback."""

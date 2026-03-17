@@ -78,14 +78,14 @@ async def test_state_machine_updates_from_device_callbacks(
     )
 
     mock_wiim_device.volume = 60
-    mock_wiim_device.playing_status = PlayingStatus.PLAYING
-    mock_wiim_device.play_mode = "Bluetooth"
-    mock_wiim_device.output_mode = "optical"
-    mock_wiim_device.loop_state = WiimLoopState(
+    mock_wiim_device._playing_status = PlayingStatus.PLAYING
+    mock_wiim_device._play_mode = "Bluetooth"
+    mock_wiim_device._output_mode = "optical"
+    mock_wiim_device._loop_state = WiimLoopState(
         repeat=WiimRepeatMode.ALL,
         shuffle=True,
     )
-    mock_wiim_device.current_media = WiimMediaMetadata(
+    mock_wiim_device._current_media = WiimMediaMetadata(
         title="New Song",
         artist="Test Artist",
         album="Test Album",
@@ -137,7 +137,7 @@ async def test_state_machine_updates_from_transport_events(
     init_wiim_media_player,
 ) -> None:
     """Test transport events update the state machine."""
-    mock_wiim_device.current_media = WiimMediaMetadata(
+    mock_wiim_device._current_media = WiimMediaMetadata(
         title="Queued Song",
         duration=240,
         position=30,
@@ -152,7 +152,7 @@ async def test_state_machine_updates_from_transport_events(
     state = hass.states.get(WIIM_ENTITY_ID)
     assert state.state == MediaPlayerState.PAUSED
 
-    mock_wiim_device.current_media = None
+    mock_wiim_device._current_media = None
     await mock_wiim_device.fire_transport_update(hass, PlayingStatus.STOPPED)
     state = hass.states.get(WIIM_ENTITY_ID)
     assert state.state == MediaPlayerState.IDLE
@@ -193,7 +193,7 @@ async def test_state_machine_updates_from_transport_events(
             {ATTR_INPUT_SOURCE: "Bluetooth"},
             "async_set_play_mode",
             ("Bluetooth",),
-            {"play_mode": "Bluetooth"},
+            {"_play_mode": "Bluetooth"},
             ATTR_INPUT_SOURCE,
             "Bluetooth",
         ),
@@ -257,7 +257,7 @@ async def test_repeat_and_shuffle_services_update_state_machine(
     mock_wiim_device.build_loop_mode.assert_called_once_with(WiimRepeatMode.ALL, False)
     mock_wiim_device.async_set_loop_mode.assert_awaited_once_with(repeat_loop_mode)
 
-    mock_wiim_device.loop_state = WiimLoopState(
+    mock_wiim_device._loop_state = WiimLoopState(
         repeat=WiimRepeatMode.ALL,
         shuffle=False,
     )
@@ -278,7 +278,7 @@ async def test_repeat_and_shuffle_services_update_state_machine(
     mock_wiim_device.build_loop_mode.assert_called_once_with(WiimRepeatMode.ALL, True)
     mock_wiim_device.async_set_loop_mode.assert_awaited_once_with(shuffle_loop_mode)
 
-    mock_wiim_device.loop_state = WiimLoopState(
+    mock_wiim_device._loop_state = WiimLoopState(
         repeat=WiimRepeatMode.ALL,
         shuffle=True,
     )
@@ -301,12 +301,12 @@ async def test_play_pause_and_seek_services_update_state_machine(
     )
     mock_wiim_device.async_play.assert_awaited_once()
 
-    mock_wiim_device.current_media = WiimMediaMetadata(
+    mock_wiim_device._current_media = WiimMediaMetadata(
         title="Playing Song",
         duration=200,
         position=12,
     )
-    mock_wiim_device.playing_status = PlayingStatus.PLAYING
+    mock_wiim_device._playing_status = PlayingStatus.PLAYING
     await mock_wiim_device.fire_general_update(hass)
 
     state = hass.states.get(WIIM_ENTITY_ID)
@@ -334,7 +334,7 @@ async def test_play_pause_and_seek_services_update_state_machine(
     )
     mock_wiim_device.async_seek.assert_awaited_once_with(60)
 
-    mock_wiim_device.current_media = WiimMediaMetadata(
+    mock_wiim_device._current_media = WiimMediaMetadata(
         title="Playing Song",
         duration=200,
         position=60,
@@ -356,14 +356,14 @@ async def test_follower_routes_commands_and_reads_leader_metadata(
         udn="uuid:leader-1234",
         name="Leader WiiM Device",
     )
-    leader_device.playing_status = PlayingStatus.STOPPED
-    leader_device.play_mode = "Network"
-    leader_device.loop_state = WiimLoopState(
+    leader_device._playing_status = PlayingStatus.STOPPED
+    leader_device._play_mode = "Network"
+    leader_device._loop_state = WiimLoopState(
         repeat=WiimRepeatMode.OFF,
         shuffle=False,
     )
-    leader_device.output_mode = "speaker"
-    leader_device.current_media = None
+    leader_device._output_mode = "speaker"
+    leader_device._current_media = None
     leader_device.async_get_transport_capabilities = AsyncMock(
         return_value=WiimTransportCapabilities(
             can_next=True,
@@ -405,9 +405,9 @@ async def test_follower_routes_commands_and_reads_leader_metadata(
     mock_wiim_device.async_seek.assert_awaited_once_with(90)
     leader_device.async_seek.assert_awaited_once_with(90)
 
-    leader_device.playing_status = PlayingStatus.PLAYING
-    leader_device.play_mode = "Spotify"
-    leader_device.current_media = WiimMediaMetadata(
+    leader_device._playing_status = PlayingStatus.PLAYING
+    leader_device._play_mode = "Spotify"
+    leader_device._current_media = WiimMediaMetadata(
         title="Leader Song",
         album="Leader Album",
         duration=210,
@@ -441,8 +441,8 @@ async def test_play_media_services_call_device_commands(
     )
     mock_wiim_device.play_preset.assert_awaited_once_with(1)
 
-    mock_wiim_device.current_media = WiimMediaMetadata(title="Preset 1")
-    mock_wiim_device.playing_status = PlayingStatus.PLAYING
+    mock_wiim_device._current_media = WiimMediaMetadata(title="Preset 1")
+    mock_wiim_device._playing_status = PlayingStatus.PLAYING
     await mock_wiim_device.fire_general_update(hass)
     state = hass.states.get(WIIM_ENTITY_ID)
     assert state.state == MediaPlayerState.PLAYING
@@ -467,7 +467,7 @@ async def test_play_media_source_service_uses_resolved_url(
     init_wiim_media_player,
 ) -> None:
     """Test media_source playback goes through the resolver."""
-    mock_wiim_device.supports_http_api = True
+    mock_wiim_device._supports_http_api = True
 
     with (
         patch(
@@ -560,7 +560,7 @@ async def test_browse_media_service_includes_media_sources_when_supported(
     init_wiim_media_player,
 ) -> None:
     """Test media sources are exposed through browse_media when HTTP API exists."""
-    mock_wiim_device.supports_http_api = True
+    mock_wiim_device._supports_http_api = True
 
     media_source_root = BrowseMedia(
         media_class=MediaClass.DIRECTORY,
