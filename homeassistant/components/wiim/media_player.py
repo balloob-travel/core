@@ -291,8 +291,8 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
     ) -> None:
         """Handle AVTransport events from the SDK.
 
-        This method updates the internal SDK device state based on events,
-        then triggers a full HA state refresh from the device's cache.
+        The SDK updates its own device state before invoking this callback.
+        This handler only refreshes the HA entity state.
         """
 
         LOGGER.debug(
@@ -302,6 +302,7 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
         )
 
         event_data = self._device.event_data
+        stopped_event = False
 
         if "TransportState" in event_data:
             sdk_status_str = event_data["TransportState"]
@@ -314,17 +315,12 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
                     sdk_status_str,
                 )
             else:
-                self._device.playing_status = sdk_status
                 if sdk_status == SDKPlayingStatus.STOPPED:
+                    stopped_event = True
                     LOGGER.debug(
                         "Device %s: TransportState is STOPPED. Resetting media position and metadata",
                         self.entity_id,
                     )
-                    self._device.current_position = 0
-                    self._device.current_track_duration = 0
-                    self._attr_media_position_updated_at = None
-                    self._attr_media_duration = None
-                    self._attr_media_position = None
                 elif sdk_status in {SDKPlayingStatus.PAUSED, SDKPlayingStatus.PLAYING}:
                     self._entry.async_create_background_task(
                         self.hass,
@@ -332,7 +328,12 @@ class WiimMediaPlayerEntity(WiimBaseEntity, MediaPlayerEntity):
                         name=f"wiim_{self.entity_id}_sync_position",
                     )
 
-        self._update_ha_state_from_sdk_cache()
+        self._update_ha_state_from_sdk_cache(write_state=False)
+        if stopped_event:
+            self._attr_media_position_updated_at = None
+            self._attr_media_duration = None
+            self._attr_media_position = None
+        self.async_write_ha_state()
 
     @callback
     def _handle_sdk_refresh_event(
