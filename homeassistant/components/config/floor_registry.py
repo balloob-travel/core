@@ -1,6 +1,5 @@
 """Websocket API to interact with the floor registry."""
 
-from functools import partial
 import logging
 from typing import Any
 
@@ -8,19 +7,15 @@ import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.components.websocket_api import ActiveConnection
-from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import floor_registry as fr
 from homeassistant.helpers.floor_registry import FloorEntry
 from homeassistant.helpers.json import json_bytes
 
 from .registry_websocket import (
-    REGISTRY_EVENT_ADD,
-    REGISTRY_EVENT_CHANGE,
-    REGISTRY_EVENT_INITIAL,
-    REGISTRY_EVENT_ORDER,
-    REGISTRY_EVENT_REMOVE,
-    construct_registry_event_message,
-    json_array_from_fragments,
+    RegistrySubscriptionSpec,
+    async_subscribe_to_registry_updates,
+    serialize_registry_entry,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -72,63 +67,8 @@ def _compressed_entry_dict(entry: FloorEntry) -> dict[str, Any]:
 @callback
 def _compressed_entry_json(entry: FloorEntry) -> bytes | None:
     """Convert entry to compact API JSON."""
-    try:
-        return json_bytes(_compressed_entry_dict(entry))
-    except ValueError, TypeError:
-        _LOGGER.exception(
-            "Unable to serialize compact floor registry entry %s to JSON",
-            entry.floor_id,
-        )
-    return None
-
-
-@callback
-def _forward_floor_registry_changes(
-    connection: ActiveConnection,
-    registry: fr.FloorRegistry,
-    msg_id: int,
-    event: Event[fr.EventFloorRegistryUpdatedData],
-) -> None:
-    """Forward floor registry updates to the websocket."""
-    if event.data["action"] == "remove":
-        connection.send_message(
-            construct_registry_event_message(
-                msg_id,
-                (REGISTRY_EVENT_REMOVE, json_bytes([event.data["floor_id"]])),
-            )
-        )
-        return
-
-    if event.data["action"] == "reorder":
-        connection.send_message(
-            construct_registry_event_message(
-                msg_id,
-                (
-                    REGISTRY_EVENT_ORDER,
-                    json_bytes(
-                        [entry.floor_id for entry in registry.async_list_floors()]
-                    ),
-                ),
-            )
-        )
-        return
-
-    if (entry := registry.async_get_floor(event.data["floor_id"])) is None:
-        return
-
-    if (entry_json := _compressed_entry_json(entry)) is None:
-        return
-
-    connection.send_message(
-        construct_registry_event_message(
-            msg_id,
-            (
-                REGISTRY_EVENT_ADD
-                if event.data["action"] == "create"
-                else REGISTRY_EVENT_CHANGE,
-                json_array_from_fragments((entry_json,)),
-            ),
-        )
+    return serialize_registry_entry(
+        entry, _compressed_entry_dict, _LOGGER, "floor", entry.floor_id
     )
 
 
@@ -143,24 +83,20 @@ def websocket_subscribe_floors(
 ) -> None:
     """Handle subscribe floors command."""
     registry = fr.async_get(hass)
-    msg_id = msg["id"]
-    connection.subscriptions[msg_id] = hass.bus.async_listen(
-        fr.EVENT_FLOOR_REGISTRY_UPDATED,
-        partial(_forward_floor_registry_changes, connection, registry, msg_id),
-    )
-    connection.send_result(msg_id)
-    connection.send_message(
-        construct_registry_event_message(
-            msg_id,
-            (
-                REGISTRY_EVENT_INITIAL,
-                json_array_from_fragments(
-                    entry_json
-                    for entry in registry.async_list_floors()
-                    if (entry_json := _compressed_entry_json(entry)) is not None
-                ),
+    async_subscribe_to_registry_updates(
+        hass,
+        connection,
+        msg,
+        RegistrySubscriptionSpec(
+            event_type=fr.EVENT_FLOOR_REGISTRY_UPDATED,
+            list_entries=registry.async_list_floors,
+            serialize_entry=_compressed_entry_json,
+            get_entry=lambda event: registry.async_get_floor(event.data["floor_id"]),
+            get_remove_id=lambda event: event.data["floor_id"],
+            get_order_payload=lambda event: json_bytes(
+                [entry.floor_id for entry in registry.async_list_floors()]
             ),
-        )
+        ),
     )
 
 

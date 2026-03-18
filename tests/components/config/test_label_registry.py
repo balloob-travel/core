@@ -124,17 +124,15 @@ async def test_subscribe_labels(
         "id": subscription,
         "type": "event",
         "event": {
-            "c": [
-                {
-                    "co": None,
-                    "cr": created_at.timestamp(),
-                    "de": "My label",
-                    "ic": None,
-                    "id": label.label_id,
-                    "mo": updated_at.timestamp(),
-                    "nm": "mock",
-                }
-            ]
+            "u": {
+                "co": None,
+                "cr": created_at.timestamp(),
+                "de": "My label",
+                "ic": None,
+                "id": label.label_id,
+                "mo": updated_at.timestamp(),
+                "nm": "mock",
+            }
         },
     }
 
@@ -145,7 +143,7 @@ async def test_subscribe_labels(
     assert msg == {
         "id": subscription,
         "type": "event",
-        "event": {"r": [label.label_id]},
+        "event": {"r": label.label_id},
     }
 
 

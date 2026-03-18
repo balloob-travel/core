@@ -183,21 +183,19 @@ async def test_subscribe_areas(
         "id": subscription,
         "type": "event",
         "event": {
-            "c": [
-                {
-                    "al": [],
-                    "cr": created_at.timestamp(),
-                    "fi": None,
-                    "he": None,
-                    "ic": None,
-                    "id": area1.id,
-                    "lb": [],
-                    "mo": updated_at.timestamp(),
-                    "nm": "Bedroom Updated",
-                    "pc": None,
-                    "te": None,
-                }
-            ]
+            "u": {
+                "al": [],
+                "cr": created_at.timestamp(),
+                "fi": None,
+                "he": None,
+                "ic": None,
+                "id": area1.id,
+                "lb": [],
+                "mo": updated_at.timestamp(),
+                "nm": "Bedroom Updated",
+                "pc": None,
+                "te": None,
+            }
         },
     }
 
@@ -218,7 +216,7 @@ async def test_subscribe_areas(
     assert msg == {
         "id": subscription,
         "type": "event",
-        "event": {"r": [area2.id]},
+        "event": {"r": area2.id},
     }
 
 

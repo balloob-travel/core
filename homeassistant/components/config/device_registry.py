@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from functools import partial
 import logging
 from typing import Any, cast
 
@@ -11,19 +10,15 @@ import voluptuous as vol
 from homeassistant import loader
 from homeassistant.components import websocket_api
 from homeassistant.components.websocket_api import require_admin
-from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers.device_registry import DeviceEntry, DeviceEntryDisabler
-from homeassistant.helpers.json import json_bytes
 
 from .registry_websocket import (
-    REGISTRY_EVENT_ADD,
-    REGISTRY_EVENT_CHANGE,
-    REGISTRY_EVENT_INITIAL,
-    REGISTRY_EVENT_REMOVE,
-    construct_registry_event_message,
-    json_array_from_fragments,
+    RegistrySubscriptionSpec,
+    async_subscribe_to_registry_updates,
+    serialize_registry_entry,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -107,48 +102,8 @@ def _device_entry_compressed_dict(entry: DeviceEntry) -> dict[str, Any]:
 @callback
 def _device_entry_compressed_json(entry: DeviceEntry) -> bytes | None:
     """Return a compressed JSON representation of a device entry."""
-    try:
-        return json_bytes(_device_entry_compressed_dict(entry))
-    except ValueError, TypeError:
-        _LOGGER.exception(
-            "Unable to serialize compact device registry entry %s to JSON", entry.id
-        )
-    return None
-
-
-@callback
-def _forward_device_registry_changes(
-    connection: websocket_api.ActiveConnection,
-    registry: dr.DeviceRegistry,
-    msg_id: int,
-    event: Event[dr.EventDeviceRegistryUpdatedData],
-) -> None:
-    """Forward device registry updates to the websocket."""
-    if event.data["action"] == "remove":
-        connection.send_message(
-            construct_registry_event_message(
-                msg_id,
-                (REGISTRY_EVENT_REMOVE, json_bytes([event.data["device_id"]])),
-            )
-        )
-        return
-
-    if (entry := registry.async_get(event.data["device_id"])) is None:
-        return
-
-    if (entry_json := _device_entry_compressed_json(entry)) is None:
-        return
-
-    connection.send_message(
-        construct_registry_event_message(
-            msg_id,
-            (
-                REGISTRY_EVENT_ADD
-                if event.data["action"] == "create"
-                else REGISTRY_EVENT_CHANGE,
-                json_array_from_fragments((entry_json,)),
-            ),
-        )
+    return serialize_registry_entry(
+        entry, _device_entry_compressed_dict, _LOGGER, "device", entry.id
     )
 
 
@@ -165,24 +120,17 @@ def websocket_subscribe_devices(
 ) -> None:
     """Handle subscribe devices command."""
     registry = dr.async_get(hass)
-    msg_id = msg["id"]
-    connection.subscriptions[msg_id] = hass.bus.async_listen(
-        dr.EVENT_DEVICE_REGISTRY_UPDATED,
-        partial(_forward_device_registry_changes, connection, registry, msg_id),
-    )
-    connection.send_result(msg_id)
-    connection.send_message(
-        construct_registry_event_message(
-            msg_id,
-            (
-                REGISTRY_EVENT_INITIAL,
-                json_array_from_fragments(
-                    entry_json
-                    for entry in registry.devices.values()
-                    if (entry_json := _device_entry_compressed_json(entry)) is not None
-                ),
-            ),
-        )
+    async_subscribe_to_registry_updates(
+        hass,
+        connection,
+        msg,
+        RegistrySubscriptionSpec(
+            event_type=dr.EVENT_DEVICE_REGISTRY_UPDATED,
+            list_entries=registry.devices.values,
+            serialize_entry=_device_entry_compressed_json,
+            get_entry=lambda event: registry.async_get(event.data["device_id"]),
+            get_remove_id=lambda event: event.data["device_id"],
+        ),
     )
 
 

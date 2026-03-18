@@ -145,15 +145,13 @@ async def test_subscribe_categories(
         "id": subscription,
         "type": "event",
         "event": {
-            "c": [
-                {
-                    "cr": created_at.timestamp(),
-                    "ic": "mdi:leaf",
-                    "id": category.category_id,
-                    "mo": updated_at.timestamp(),
-                    "nm": "Night mode",
-                }
-            ]
+            "u": {
+                "cr": created_at.timestamp(),
+                "ic": "mdi:leaf",
+                "id": category.category_id,
+                "mo": updated_at.timestamp(),
+                "nm": "Night mode",
+            }
         },
     }
 
@@ -164,7 +162,7 @@ async def test_subscribe_categories(
     assert msg == {
         "id": subscription,
         "type": "event",
-        "event": {"r": [category.category_id]},
+        "event": {"r": category.category_id},
     }
 
 

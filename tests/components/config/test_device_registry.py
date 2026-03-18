@@ -217,32 +217,30 @@ async def test_subscribe_devices(
         "id": subscription,
         "type": "event",
         "event": {
-            "c": [
-                {
-                    "ai": None,
-                    "ce": [entry.entry_id],
-                    "co": [],
-                    "cr": created_at.timestamp(),
-                    "cs": {entry.entry_id: [None]},
-                    "cu": None,
-                    "db": None,
-                    "et": None,
-                    "hw": None,
-                    "id": device.id,
-                    "ii": [["bridgeid", "0123"]],
-                    "lb": [],
-                    "md": None,
-                    "mf": None,
-                    "mi": None,
-                    "mo": modified_at.timestamp(),
-                    "nb": "Bridge",
-                    "nm": None,
-                    "pc": None,
-                    "sn": None,
-                    "sw": None,
-                    "vd": None,
-                }
-            ]
+            "u": {
+                "ai": None,
+                "ce": [entry.entry_id],
+                "co": [],
+                "cr": created_at.timestamp(),
+                "cs": {entry.entry_id: [None]},
+                "cu": None,
+                "db": None,
+                "et": None,
+                "hw": None,
+                "id": device.id,
+                "ii": [["bridgeid", "0123"]],
+                "lb": [],
+                "md": None,
+                "mf": None,
+                "mi": None,
+                "mo": modified_at.timestamp(),
+                "nb": "Bridge",
+                "nm": None,
+                "pc": None,
+                "sn": None,
+                "sw": None,
+                "vd": None,
+            }
         },
     }
 
@@ -253,7 +251,7 @@ async def test_subscribe_devices(
     assert msg == {
         "id": subscription,
         "type": "event",
-        "event": {"r": [device.id]},
+        "event": {"r": device.id},
     }
 
 

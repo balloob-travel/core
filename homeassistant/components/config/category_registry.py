@@ -1,6 +1,5 @@
 """Websocket API to interact with the category registry."""
 
-from functools import partial
 import logging
 from typing import Any
 
@@ -8,17 +7,13 @@ import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.components.websocket_api import ActiveConnection
-from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import category_registry as cr, config_validation as cv
-from homeassistant.helpers.json import json_bytes
 
 from .registry_websocket import (
-    REGISTRY_EVENT_ADD,
-    REGISTRY_EVENT_CHANGE,
-    REGISTRY_EVENT_INITIAL,
-    REGISTRY_EVENT_REMOVE,
-    construct_registry_event_message,
-    json_array_from_fragments,
+    RegistrySubscriptionSpec,
+    async_subscribe_to_registry_updates,
+    serialize_registry_entry,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -71,57 +66,8 @@ def _compressed_entry_dict(entry: cr.CategoryEntry) -> dict[str, Any]:
 @callback
 def _compressed_entry_json(entry: cr.CategoryEntry) -> bytes | None:
     """Convert entry to compact API JSON."""
-    try:
-        return json_bytes(_compressed_entry_dict(entry))
-    except ValueError, TypeError:
-        _LOGGER.exception(
-            "Unable to serialize compact category registry entry %s to JSON",
-            entry.category_id,
-        )
-    return None
-
-
-@callback
-def _forward_category_registry_changes(
-    connection: ActiveConnection,
-    registry: cr.CategoryRegistry,
-    msg_id: int,
-    scope: str,
-    event: Event[cr.EventCategoryRegistryUpdatedData],
-) -> None:
-    """Forward category registry updates to the websocket."""
-    if event.data["scope"] != scope:
-        return
-
-    if event.data["action"] == "remove":
-        connection.send_message(
-            construct_registry_event_message(
-                msg_id,
-                (REGISTRY_EVENT_REMOVE, json_bytes([event.data["category_id"]])),
-            )
-        )
-        return
-
-    if (
-        entry := registry.async_get_category(
-            scope=scope, category_id=event.data["category_id"]
-        )
-    ) is None:
-        return
-
-    if (entry_json := _compressed_entry_json(entry)) is None:
-        return
-
-    connection.send_message(
-        construct_registry_event_message(
-            msg_id,
-            (
-                REGISTRY_EVENT_ADD
-                if event.data["action"] == "create"
-                else REGISTRY_EVENT_CHANGE,
-                json_array_from_fragments((entry_json,)),
-            ),
-        )
+    return serialize_registry_entry(
+        entry, _compressed_entry_dict, _LOGGER, "category", entry.category_id
     )
 
 
@@ -137,31 +83,21 @@ def websocket_subscribe_categories(
 ) -> None:
     """Handle subscribe categories command."""
     category_registry = cr.async_get(hass)
-    msg_id = msg["id"]
     scope = msg["scope"]
-    connection.subscriptions[msg_id] = hass.bus.async_listen(
-        cr.EVENT_CATEGORY_REGISTRY_UPDATED,
-        partial(
-            _forward_category_registry_changes,
-            connection,
-            category_registry,
-            msg_id,
-            scope,
-        ),
-    )
-    connection.send_result(msg_id)
-    connection.send_message(
-        construct_registry_event_message(
-            msg_id,
-            (
-                REGISTRY_EVENT_INITIAL,
-                json_array_from_fragments(
-                    entry_json
-                    for entry in category_registry.async_list_categories(scope=scope)
-                    if (entry_json := _compressed_entry_json(entry)) is not None
-                ),
+    async_subscribe_to_registry_updates(
+        hass,
+        connection,
+        msg,
+        RegistrySubscriptionSpec(
+            event_type=cr.EVENT_CATEGORY_REGISTRY_UPDATED,
+            list_entries=lambda: category_registry.async_list_categories(scope=scope),
+            serialize_entry=_compressed_entry_json,
+            get_entry=lambda event: category_registry.async_get_category(
+                scope=scope, category_id=event.data["category_id"]
             ),
-        )
+            get_remove_id=lambda event: event.data["category_id"],
+            is_relevant=lambda event: event.data["scope"] == scope,
+        ),
     )
 
 

@@ -140,17 +140,15 @@ async def test_subscribe_floors(
         "id": subscription,
         "type": "event",
         "event": {
-            "c": [
-                {
-                    "al": [],
-                    "cr": created_at.timestamp(),
-                    "ic": None,
-                    "id": floor1.floor_id,
-                    "lv": None,
-                    "mo": updated_at.timestamp(),
-                    "nm": "Ground floor",
-                }
-            ]
+            "u": {
+                "al": [],
+                "cr": created_at.timestamp(),
+                "ic": None,
+                "id": floor1.floor_id,
+                "lv": None,
+                "mo": updated_at.timestamp(),
+                "nm": "Ground floor",
+            }
         },
     }
 
@@ -171,7 +169,7 @@ async def test_subscribe_floors(
     assert msg == {
         "id": subscription,
         "type": "event",
-        "event": {"r": [floor2.floor_id]},
+        "event": {"r": floor2.floor_id},
     }
 
 

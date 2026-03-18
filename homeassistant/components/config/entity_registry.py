@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-from functools import partial
 import logging
 from typing import Any
 
@@ -20,12 +19,10 @@ from homeassistant.helpers import (
 from homeassistant.helpers.json import json_bytes, json_dumps
 
 from .registry_websocket import (
-    REGISTRY_EVENT_ADD,
-    REGISTRY_EVENT_CHANGE,
-    REGISTRY_EVENT_INITIAL,
     REGISTRY_EVENT_REMOVE,
-    construct_registry_event_message,
-    json_array_from_fragments,
+    RegistrySubscriptionSpec,
+    async_subscribe_to_registry_updates,
+    serialize_registry_entry,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -136,104 +133,59 @@ def _compressed_entity_dict(entry: er.RegistryEntry) -> dict[str, Any]:
 @callback
 def _compressed_entity_json(entry: er.RegistryEntry) -> bytes | None:
     """Return a compressed JSON representation of an entity registry entry."""
-    try:
-        return json_bytes(_compressed_entity_dict(entry))
-    except ValueError, TypeError:
-        _LOGGER.exception(
-            "Unable to serialize compact entity registry entry %s to JSON",
-            entry.entity_id,
-        )
-    return None
+    return serialize_registry_entry(
+        entry, _compressed_entity_dict, _LOGGER, "entity", entry.entity_id
+    )
 
 
 @callback
-def _forward_entity_registry_changes(
-    connection: websocket_api.ActiveConnection,
-    registry: er.EntityRegistry,
-    msg_id: int,
-    event: Event[er.EventEntityRegistryUpdatedData],
-) -> None:
-    """Forward entity registry updates to the websocket."""
-    if event.data["action"] == "remove":
-        connection.send_message(
-            construct_registry_event_message(
-                msg_id,
-                (REGISTRY_EVENT_REMOVE, json_bytes([event.data["entity_id"]])),
-            )
-        )
-        return
-
-    if (entry := registry.async_get(event.data["entity_id"])) is None:
-        return
-
-    if (entry_json := _compressed_entity_json(entry)) is None:
-        return
-
-    parts: list[tuple[str, bytes]] = [
-        (
-            REGISTRY_EVENT_ADD
-            if event.data["action"] == "create"
-            else REGISTRY_EVENT_CHANGE,
-            json_array_from_fragments((entry_json,)),
-        )
-    ]
-
+def _entity_registry_extra_event_parts(
+    event: Event[er.EventEntityRegistryUpdatedData], entry: er.RegistryEntry | None
+) -> tuple[tuple[str, bytes], ...]:
+    """Build extra entity registry websocket event parts."""
     if old_entity_id := event.data.get("old_entity_id"):
-        parts.append((REGISTRY_EVENT_REMOVE, json_bytes([old_entity_id])))
-
-    connection.send_message(construct_registry_event_message(msg_id, *parts))
+        return ((REGISTRY_EVENT_REMOVE, json_bytes(old_entity_id)),)
+    return ()
 
 
 @callback
-def _forward_display_entity_registry_changes(
-    connection: websocket_api.ActiveConnection,
-    registry: er.EntityRegistry,
-    msg_id: int,
-    event: Event[er.EventEntityRegistryUpdatedData],
-) -> None:
-    """Forward display entity registry updates to the websocket."""
-    if event.data["action"] == "remove":
-        connection.send_message(
-            construct_registry_event_message(
-                msg_id,
-                (REGISTRY_EVENT_REMOVE, json_bytes([event.data["entity_id"]])),
-            )
-        )
-        return
+def _display_entity_json(entry: er.RegistryEntry) -> bytes | None:
+    """Return a display entry JSON representation if visible."""
+    if entry.disabled_by is not None:
+        return None
+    return entry.display_json_repr
 
-    if (entry := registry.async_get(event.data["entity_id"])) is None:
-        return
 
-    parts: list[tuple[str, bytes]] = []
+@callback
+def _display_entity_registry_extra_event_parts(
+    event: Event[er.EventEntityRegistryUpdatedData], entry: er.RegistryEntry | None
+) -> tuple[tuple[str, bytes], ...]:
+    """Build extra display entity registry websocket event parts."""
     old_entity_id = event.data.get("old_entity_id")
 
-    if entry.disabled_by is None and entry.display_json_repr is not None:
-        parts.append(
-            (
-                REGISTRY_EVENT_ADD
-                if event.data["action"] == "create"
-                else REGISTRY_EVENT_CHANGE,
-                json_array_from_fragments((entry.display_json_repr,)),
-            )
-        )
+    if (
+        entry is not None
+        and entry.disabled_by is None
+        and entry.display_json_repr is not None
+    ):
         if (
             event.data["action"] == "update"
             and old_entity_id is not None
             and old_entity_id != entry.entity_id
         ):
-            parts.append((REGISTRY_EVENT_REMOVE, json_bytes([old_entity_id])))
-    elif event.data["action"] == "update" and (
-        "disabled_by" in event.data["changes"] or "old_entity_id" in event.data
+            return ((REGISTRY_EVENT_REMOVE, json_bytes(old_entity_id)),)
+    elif entry is None or (
+        event.data["action"] == "update"
+        and ("disabled_by" in event.data["changes"] or "old_entity_id" in event.data)
     ):
-        parts.append(
+        return (
             (
                 REGISTRY_EVENT_REMOVE,
-                json_bytes([old_entity_id or event.data["entity_id"]]),
-            )
+                json_bytes(old_entity_id or event.data["entity_id"]),
+            ),
         )
 
-    if parts:
-        connection.send_message(construct_registry_event_message(msg_id, *parts))
+    return ()
 
 
 @websocket_api.websocket_command(
@@ -247,24 +199,18 @@ def websocket_subscribe_entities(
 ) -> None:
     """Handle subscribe entity registry command."""
     registry = er.async_get(hass)
-    msg_id = msg["id"]
-    connection.subscriptions[msg_id] = hass.bus.async_listen(
-        er.EVENT_ENTITY_REGISTRY_UPDATED,
-        partial(_forward_entity_registry_changes, connection, registry, msg_id),
-    )
-    connection.send_result(msg_id)
-    connection.send_message(
-        construct_registry_event_message(
-            msg_id,
-            (
-                REGISTRY_EVENT_INITIAL,
-                json_array_from_fragments(
-                    entry_json
-                    for entry in registry.entities.values()
-                    if (entry_json := _compressed_entity_json(entry)) is not None
-                ),
-            ),
-        )
+    async_subscribe_to_registry_updates(
+        hass,
+        connection,
+        msg,
+        RegistrySubscriptionSpec(
+            event_type=er.EVENT_ENTITY_REGISTRY_UPDATED,
+            list_entries=registry.entities.values,
+            serialize_entry=_compressed_entity_json,
+            get_entry=lambda event: registry.async_get(event.data["entity_id"]),
+            get_remove_id=lambda event: event.data["entity_id"],
+            extra_event_parts=_entity_registry_extra_event_parts,
+        ),
     )
 
 
@@ -279,25 +225,19 @@ def websocket_subscribe_entities_for_display(
 ) -> None:
     """Handle subscribe entity registry display command."""
     registry = er.async_get(hass)
-    msg_id = msg["id"]
-    connection.subscriptions[msg_id] = hass.bus.async_listen(
-        er.EVENT_ENTITY_REGISTRY_UPDATED,
-        partial(_forward_display_entity_registry_changes, connection, registry, msg_id),
-    )
-    connection.send_result(msg_id)
-    connection.send_message(
-        construct_registry_event_message(
-            msg_id,
-            ("ec", _ENTITY_CATEGORIES_BYTES),
-            (
-                REGISTRY_EVENT_INITIAL,
-                json_array_from_fragments(
-                    entry.display_json_repr
-                    for entry in registry.entities.values()
-                    if entry.disabled_by is None and entry.display_json_repr is not None
-                ),
-            ),
-        )
+    async_subscribe_to_registry_updates(
+        hass,
+        connection,
+        msg,
+        RegistrySubscriptionSpec(
+            event_type=er.EVENT_ENTITY_REGISTRY_UPDATED,
+            list_entries=registry.entities.values,
+            serialize_entry=_display_entity_json,
+            get_entry=lambda event: registry.async_get(event.data["entity_id"]),
+            get_remove_id=lambda event: event.data["entity_id"],
+            extra_initial_parts=lambda: (("ec", _ENTITY_CATEGORIES_BYTES),),
+            extra_event_parts=_display_entity_registry_extra_event_parts,
+        ),
     )
 
 

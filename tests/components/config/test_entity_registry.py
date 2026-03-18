@@ -375,32 +375,30 @@ async def test_subscribe_entities(
         "id": subscription,
         "type": "event",
         "event": {
-            "c": [
-                {
-                    "ai": None,
-                    "ce": None,
-                    "cg": {},
-                    "cr": entry.created_at.timestamp(),
-                    "cs": None,
-                    "db": None,
-                    "di": None,
-                    "ec": None,
-                    "ei": "test_domain.renamed",
-                    "hb": None,
-                    "hn": False,
-                    "ic": "mdi:ceiling-light",
-                    "id": entry.id,
-                    "lb": [],
-                    "mo": entry.modified_at.timestamp(),
-                    "nm": "Hello World",
-                    "on": None,
-                    "op": {},
-                    "pl": "test_platform",
-                    "tk": None,
-                    "ui": "1234",
-                }
-            ],
-            "r": ["test_domain.name"],
+            "u": {
+                "ai": None,
+                "ce": None,
+                "cg": {},
+                "cr": entry.created_at.timestamp(),
+                "cs": None,
+                "db": None,
+                "di": None,
+                "ec": None,
+                "ei": "test_domain.renamed",
+                "hb": None,
+                "hn": False,
+                "ic": "mdi:ceiling-light",
+                "id": entry.id,
+                "lb": [],
+                "mo": entry.modified_at.timestamp(),
+                "nm": "Hello World",
+                "on": None,
+                "op": {},
+                "pl": "test_platform",
+                "tk": None,
+                "ui": "1234",
+            },
+            "r": "test_domain.name",
         },
     }
 
@@ -411,7 +409,7 @@ async def test_subscribe_entities(
     assert msg == {
         "id": subscription,
         "type": "event",
-        "event": {"r": ["test_domain.renamed"]},
+        "event": {"r": "test_domain.renamed"},
     }
 
 
@@ -478,15 +476,13 @@ async def test_subscribe_entities_for_display(
         "id": subscription,
         "type": "event",
         "event": {
-            "c": [
-                {
-                    "ei": "test_domain.renamed",
-                    "en": "Visible",
-                    "lb": [],
-                    "pl": "test_platform",
-                }
-            ],
-            "r": ["test_domain.visible"],
+            "u": {
+                "ei": "test_domain.renamed",
+                "en": "Visible",
+                "lb": [],
+                "pl": "test_platform",
+            },
+            "r": "test_domain.visible",
         },
     }
 
@@ -499,7 +495,7 @@ async def test_subscribe_entities_for_display(
     assert msg == {
         "id": subscription,
         "type": "event",
-        "event": {"r": ["test_domain.renamed"]},
+        "event": {"r": "test_domain.renamed"},
     }
 
     class Unserializable:

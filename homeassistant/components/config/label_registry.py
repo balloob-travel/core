@@ -1,6 +1,5 @@
 """Websocket API to interact with the label registry."""
 
-from functools import partial
 import logging
 from typing import Any
 
@@ -8,18 +7,14 @@ import voluptuous as vol
 
 from homeassistant.components import websocket_api
 from homeassistant.components.websocket_api import ActiveConnection
-from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import config_validation as cv, label_registry as lr
-from homeassistant.helpers.json import json_bytes
 from homeassistant.helpers.label_registry import LabelEntry
 
 from .registry_websocket import (
-    REGISTRY_EVENT_ADD,
-    REGISTRY_EVENT_CHANGE,
-    REGISTRY_EVENT_INITIAL,
-    REGISTRY_EVENT_REMOVE,
-    construct_registry_event_message,
-    json_array_from_fragments,
+    RegistrySubscriptionSpec,
+    async_subscribe_to_registry_updates,
+    serialize_registry_entry,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -99,49 +94,8 @@ def _compressed_entry_dict(entry: LabelEntry) -> dict[str, Any]:
 @callback
 def _compressed_entry_json(entry: LabelEntry) -> bytes | None:
     """Convert entry to compact API JSON."""
-    try:
-        return json_bytes(_compressed_entry_dict(entry))
-    except ValueError, TypeError:
-        _LOGGER.exception(
-            "Unable to serialize compact label registry entry %s to JSON",
-            entry.label_id,
-        )
-    return None
-
-
-@callback
-def _forward_label_registry_changes(
-    connection: ActiveConnection,
-    registry: lr.LabelRegistry,
-    msg_id: int,
-    event: Event[lr.EventLabelRegistryUpdatedData],
-) -> None:
-    """Forward label registry updates to the websocket."""
-    if event.data["action"] == "remove":
-        connection.send_message(
-            construct_registry_event_message(
-                msg_id,
-                (REGISTRY_EVENT_REMOVE, json_bytes([event.data["label_id"]])),
-            )
-        )
-        return
-
-    if (entry := registry.async_get_label(event.data["label_id"])) is None:
-        return
-
-    if (entry_json := _compressed_entry_json(entry)) is None:
-        return
-
-    connection.send_message(
-        construct_registry_event_message(
-            msg_id,
-            (
-                REGISTRY_EVENT_ADD
-                if event.data["action"] == "create"
-                else REGISTRY_EVENT_CHANGE,
-                json_array_from_fragments((entry_json,)),
-            ),
-        )
+    return serialize_registry_entry(
+        entry, _compressed_entry_dict, _LOGGER, "label", entry.label_id
     )
 
 
@@ -156,24 +110,17 @@ def websocket_subscribe_labels(
 ) -> None:
     """Handle subscribe labels command."""
     registry = lr.async_get(hass)
-    msg_id = msg["id"]
-    connection.subscriptions[msg_id] = hass.bus.async_listen(
-        lr.EVENT_LABEL_REGISTRY_UPDATED,
-        partial(_forward_label_registry_changes, connection, registry, msg_id),
-    )
-    connection.send_result(msg_id)
-    connection.send_message(
-        construct_registry_event_message(
-            msg_id,
-            (
-                REGISTRY_EVENT_INITIAL,
-                json_array_from_fragments(
-                    entry_json
-                    for entry in registry.async_list_labels()
-                    if (entry_json := _compressed_entry_json(entry)) is not None
-                ),
-            ),
-        )
+    async_subscribe_to_registry_updates(
+        hass,
+        connection,
+        msg,
+        RegistrySubscriptionSpec(
+            event_type=lr.EVENT_LABEL_REGISTRY_UPDATED,
+            list_entries=registry.async_list_labels,
+            serialize_entry=_compressed_entry_json,
+            get_entry=lambda event: registry.async_get_label(event.data["label_id"]),
+            get_remove_id=lambda event: event.data["label_id"],
+        ),
     )
 
 
