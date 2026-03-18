@@ -457,12 +457,8 @@ async def test_follower_routes_repeat_shuffle_and_source_commands_to_leader(
     mock_wiim_controller.get_device.side_effect = lambda udn: (
         leader_device if udn == leader_device.udn else mock_wiim_device
     )
-    mock_wiim_device.async_set_loop_mode.side_effect = (
-        leader_device.async_set_loop_mode
-    )
-    mock_wiim_device.async_set_play_mode.side_effect = (
-        leader_device.async_set_play_mode
-    )
+    mock_wiim_device.async_set_loop_mode.side_effect = leader_device.async_set_loop_mode
+    mock_wiim_device.async_set_play_mode.side_effect = leader_device.async_set_play_mode
     mock_wiim_device.async_get_transport_capabilities.side_effect = (
         leader_device.async_get_transport_capabilities
     )
