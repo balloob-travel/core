@@ -110,6 +110,118 @@ async def test_list_areas(
     ]
 
 
+async def test_subscribe_areas(
+    hass: HomeAssistant,
+    client: MockHAClientWebSocket,
+    area_registry: ar.AreaRegistry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test subscribing to area registry updates."""
+    created_at = datetime.fromisoformat("2024-07-16T13:30:00.900075+00:00")
+    freezer.move_to(created_at)
+    area1 = area_registry.async_create("Bedroom")
+
+    created_at_2 = datetime.fromisoformat("2024-07-16T13:45:00.900075+00:00")
+    freezer.move_to(created_at_2)
+    area2 = area_registry.async_create("Kitchen")
+
+    await client.send_json_auto_id({"type": "config/area_registry/subscribe"})
+
+    msg = await client.receive_json()
+    subscription = msg["id"]
+    assert msg == {
+        "id": subscription,
+        "type": "result",
+        "success": True,
+        "result": None,
+    }
+
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {
+            "i": [
+                {
+                    "al": [],
+                    "cr": created_at.timestamp(),
+                    "fi": None,
+                    "he": None,
+                    "ic": None,
+                    "id": area1.id,
+                    "lb": [],
+                    "mo": created_at.timestamp(),
+                    "nm": "Bedroom",
+                    "pc": None,
+                    "te": None,
+                },
+                {
+                    "al": [],
+                    "cr": created_at_2.timestamp(),
+                    "fi": None,
+                    "he": None,
+                    "ic": None,
+                    "id": area2.id,
+                    "lb": [],
+                    "mo": created_at_2.timestamp(),
+                    "nm": "Kitchen",
+                    "pc": None,
+                    "te": None,
+                },
+            ]
+        },
+    }
+
+    updated_at = datetime.fromisoformat("2024-07-16T13:50:00.900075+00:00")
+    freezer.move_to(updated_at)
+    area1 = area_registry.async_update(area1.id, name="Bedroom Updated")
+    await hass.async_block_till_done()
+
+    assert area1.name == "Bedroom Updated"
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {
+            "c": [
+                {
+                    "al": [],
+                    "cr": created_at.timestamp(),
+                    "fi": None,
+                    "he": None,
+                    "ic": None,
+                    "id": area1.id,
+                    "lb": [],
+                    "mo": updated_at.timestamp(),
+                    "nm": "Bedroom Updated",
+                    "pc": None,
+                    "te": None,
+                }
+            ]
+        },
+    }
+
+    area_registry.async_reorder([area2.id, area1.id])
+    await hass.async_block_till_done()
+
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {"o": [area2.id, area1.id]},
+    }
+
+    area_registry.async_delete(area2.id)
+    await hass.async_block_till_done()
+
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {"r": [area2.id]},
+    }
+
+
 async def test_create_area(
     client: MockHAClientWebSocket,
     area_registry: ar.AreaRegistry,

@@ -73,6 +73,82 @@ async def test_list_labels(
     }
 
 
+async def test_subscribe_labels(
+    hass: HomeAssistant,
+    client: MockHAClientWebSocket,
+    label_registry: lr.LabelRegistry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test subscribing to label registry updates."""
+    created_at = datetime.fromisoformat("2024-07-16T13:30:00.900075+00:00")
+    freezer.move_to(created_at)
+    label = label_registry.async_create("mock")
+
+    await client.send_json_auto_id({"type": "config/label_registry/subscribe"})
+
+    msg = await client.receive_json()
+    subscription = msg["id"]
+    assert msg == {
+        "id": subscription,
+        "type": "result",
+        "success": True,
+        "result": None,
+    }
+
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {
+            "i": [
+                {
+                    "co": None,
+                    "cr": created_at.timestamp(),
+                    "de": None,
+                    "ic": None,
+                    "id": label.label_id,
+                    "mo": created_at.timestamp(),
+                    "nm": "mock",
+                }
+            ]
+        },
+    }
+
+    updated_at = datetime.fromisoformat("2024-07-16T13:45:00.900075+00:00")
+    freezer.move_to(updated_at)
+    label = label_registry.async_update(label.label_id, description="My label")
+    await hass.async_block_till_done()
+
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {
+            "c": [
+                {
+                    "co": None,
+                    "cr": created_at.timestamp(),
+                    "de": "My label",
+                    "ic": None,
+                    "id": label.label_id,
+                    "mo": updated_at.timestamp(),
+                    "nm": "mock",
+                }
+            ]
+        },
+    }
+
+    label_registry.async_delete(label.label_id)
+    await hass.async_block_till_done()
+
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {"r": [label.label_id]},
+    }
+
+
 async def test_create_label(
     client: MockHAClientWebSocket,
     label_registry: lr.LabelRegistry,

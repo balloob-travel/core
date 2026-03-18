@@ -145,6 +145,118 @@ async def test_list_devices(
     device_registry.async_remove_device(device2.id)
 
 
+async def test_subscribe_devices(
+    hass: HomeAssistant,
+    client: MockHAClientWebSocket,
+    device_registry: dr.DeviceRegistry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test subscribing to device registry updates."""
+    entry = MockConfigEntry(title=None)
+    entry.add_to_hass(hass)
+
+    created_at = datetime.fromisoformat("2024-07-16T13:30:00.900075+00:00")
+    freezer.move_to(created_at)
+    device = device_registry.async_get_or_create(
+        config_entry_id=entry.entry_id,
+        identifiers={("bridgeid", "0123")},
+    )
+
+    await client.send_json_auto_id({"type": "config/device_registry/subscribe"})
+
+    msg = await client.receive_json()
+    subscription = msg["id"]
+    assert msg == {
+        "id": subscription,
+        "type": "result",
+        "success": True,
+        "result": None,
+    }
+
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {
+            "i": [
+                {
+                    "ai": None,
+                    "ce": [entry.entry_id],
+                    "co": [],
+                    "cr": created_at.timestamp(),
+                    "cs": {entry.entry_id: [None]},
+                    "cu": None,
+                    "db": None,
+                    "et": None,
+                    "hw": None,
+                    "id": device.id,
+                    "ii": [["bridgeid", "0123"]],
+                    "lb": [],
+                    "md": None,
+                    "mf": None,
+                    "mi": None,
+                    "mo": created_at.timestamp(),
+                    "nb": None,
+                    "nm": None,
+                    "pc": None,
+                    "sn": None,
+                    "sw": None,
+                    "vd": None,
+                }
+            ]
+        },
+    }
+
+    modified_at = datetime.fromisoformat("2024-07-16T13:45:00.900075+00:00")
+    freezer.move_to(modified_at)
+    device = device_registry.async_update_device(device.id, name_by_user="Bridge")
+    await hass.async_block_till_done()
+
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {
+            "c": [
+                {
+                    "ai": None,
+                    "ce": [entry.entry_id],
+                    "co": [],
+                    "cr": created_at.timestamp(),
+                    "cs": {entry.entry_id: [None]},
+                    "cu": None,
+                    "db": None,
+                    "et": None,
+                    "hw": None,
+                    "id": device.id,
+                    "ii": [["bridgeid", "0123"]],
+                    "lb": [],
+                    "md": None,
+                    "mf": None,
+                    "mi": None,
+                    "mo": modified_at.timestamp(),
+                    "nb": "Bridge",
+                    "nm": None,
+                    "pc": None,
+                    "sn": None,
+                    "sw": None,
+                    "vd": None,
+                }
+            ]
+        },
+    }
+
+    device_registry.async_remove_device(device.id)
+    await hass.async_block_till_done()
+
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {"r": [device.id]},
+    }
+
+
 @pytest.mark.parametrize(
     ("payload_key", "payload_value"),
     [

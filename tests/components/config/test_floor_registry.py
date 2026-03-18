@@ -76,6 +76,105 @@ async def test_list_floors(
     }
 
 
+async def test_subscribe_floors(
+    hass: HomeAssistant,
+    client: MockHAClientWebSocket,
+    floor_registry: fr.FloorRegistry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test subscribing to floor registry updates."""
+    created_at = datetime.fromisoformat("2024-07-16T13:30:00.900075+00:00")
+    freezer.move_to(created_at)
+    floor1 = floor_registry.async_create("First floor")
+
+    created_at_2 = datetime.fromisoformat("2024-07-16T13:45:00.900075+00:00")
+    freezer.move_to(created_at_2)
+    floor2 = floor_registry.async_create("Second floor")
+
+    await client.send_json_auto_id({"type": "config/floor_registry/subscribe"})
+
+    msg = await client.receive_json()
+    subscription = msg["id"]
+    assert msg == {
+        "id": subscription,
+        "type": "result",
+        "success": True,
+        "result": None,
+    }
+
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {
+            "i": [
+                {
+                    "al": [],
+                    "cr": created_at.timestamp(),
+                    "ic": None,
+                    "id": floor1.floor_id,
+                    "lv": None,
+                    "mo": created_at.timestamp(),
+                    "nm": "First floor",
+                },
+                {
+                    "al": [],
+                    "cr": created_at_2.timestamp(),
+                    "ic": None,
+                    "id": floor2.floor_id,
+                    "lv": None,
+                    "mo": created_at_2.timestamp(),
+                    "nm": "Second floor",
+                },
+            ]
+        },
+    }
+
+    updated_at = datetime.fromisoformat("2024-07-16T13:50:00.900075+00:00")
+    freezer.move_to(updated_at)
+    floor1 = floor_registry.async_update(floor1.floor_id, name="Ground floor")
+    await hass.async_block_till_done()
+
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {
+            "c": [
+                {
+                    "al": [],
+                    "cr": created_at.timestamp(),
+                    "ic": None,
+                    "id": floor1.floor_id,
+                    "lv": None,
+                    "mo": updated_at.timestamp(),
+                    "nm": "Ground floor",
+                }
+            ]
+        },
+    }
+
+    floor_registry.async_reorder([floor2.floor_id, floor1.floor_id])
+    await hass.async_block_till_done()
+
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {"o": [floor2.floor_id, floor1.floor_id]},
+    }
+
+    floor_registry.async_delete(floor2.floor_id)
+    await hass.async_block_till_done()
+
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {"r": [floor2.floor_id]},
+    }
+
+
 @pytest.mark.usefixtures("freezer")
 async def test_create_floor(
     client: MockHAClientWebSocket,

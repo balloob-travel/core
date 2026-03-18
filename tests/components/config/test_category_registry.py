@@ -87,6 +87,87 @@ async def test_list_categories(
     }
 
 
+async def test_subscribe_categories(
+    hass: HomeAssistant,
+    client: MockHAClientWebSocket,
+    category_registry: cr.CategoryRegistry,
+    freezer: FrozenDateTimeFactory,
+) -> None:
+    """Test subscribing to category registry updates."""
+    created_at = datetime(2024, 2, 14, 12, 0, 0)
+    freezer.move_to(created_at)
+    category = category_registry.async_create(
+        scope="automation", name="Energy saving", icon="mdi:leaf"
+    )
+    category_registry.async_create(
+        scope="zone", name="Grocery stores", icon="mdi:store"
+    )
+
+    await client.send_json_auto_id(
+        {"type": "config/category_registry/subscribe", "scope": "automation"}
+    )
+
+    msg = await client.receive_json()
+    subscription = msg["id"]
+    assert msg == {
+        "id": subscription,
+        "type": "result",
+        "success": True,
+        "result": None,
+    }
+
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {
+            "i": [
+                {
+                    "cr": created_at.timestamp(),
+                    "ic": "mdi:leaf",
+                    "id": category.category_id,
+                    "mo": created_at.timestamp(),
+                    "nm": "Energy saving",
+                }
+            ]
+        },
+    }
+
+    updated_at = datetime(2024, 3, 14, 12, 0, 0)
+    freezer.move_to(updated_at)
+    category = category_registry.async_update(
+        scope="automation", category_id=category.category_id, name="Night mode"
+    )
+    await hass.async_block_till_done()
+
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {
+            "c": [
+                {
+                    "cr": created_at.timestamp(),
+                    "ic": "mdi:leaf",
+                    "id": category.category_id,
+                    "mo": updated_at.timestamp(),
+                    "nm": "Night mode",
+                }
+            ]
+        },
+    }
+
+    category_registry.async_delete(scope="automation", category_id=category.category_id)
+    await hass.async_block_till_done()
+
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {"r": [category.category_id]},
+    }
+
+
 async def test_create_category(
     client: MockHAClientWebSocket,
     category_registry: cr.CategoryRegistry,
