@@ -318,6 +318,119 @@ async def test_list_entities_for_display(
         ],
     }
 
+
+async def test_subscribe_entities(
+    hass: HomeAssistant, client: MockHAClientWebSocket
+) -> None:
+    """Test subscribing to entity registry updates."""
+    mock_registry(
+        hass,
+        {
+            "test_domain.name": RegistryEntryWithDefaults(
+                entity_id="test_domain.name",
+                unique_id="1234",
+                platform="test_platform",
+                name="Hello World",
+            )
+        },
+    )
+    registry = er.async_get(hass)
+    entry = registry.async_get("test_domain.name")
+    assert entry is not None
+
+    await client.send_json_auto_id({"type": "config/entity_registry/subscribe"})
+
+    msg = await client.receive_json()
+    subscription = msg["id"]
+    assert msg == {
+        "id": subscription,
+        "type": "result",
+        "success": True,
+        "result": None,
+    }
+
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {
+            "i": [
+                {
+                    "ai": None,
+                    "ce": None,
+                    "cg": {},
+                    "cr": entry.created_at.timestamp(),
+                    "cs": None,
+                    "db": None,
+                    "di": None,
+                    "ec": None,
+                    "ei": "test_domain.name",
+                    "hb": None,
+                    "hn": False,
+                    "ic": None,
+                    "id": entry.id,
+                    "lb": [],
+                    "mo": entry.modified_at.timestamp(),
+                    "nm": "Hello World",
+                    "on": None,
+                    "op": {},
+                    "pl": "test_platform",
+                    "tk": None,
+                    "ui": "1234",
+                }
+            ]
+        },
+    }
+
+    entry = registry.async_update_entity(
+        "test_domain.name",
+        icon="mdi:ceiling-light",
+        new_entity_id="test_domain.renamed",
+    )
+    await hass.async_block_till_done()
+
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {
+            "u": {
+                "ai": None,
+                "ce": None,
+                "cg": {},
+                "cr": entry.created_at.timestamp(),
+                "cs": None,
+                "db": None,
+                "di": None,
+                "ec": None,
+                "ei": "test_domain.renamed",
+                "hb": None,
+                "hn": False,
+                "ic": "mdi:ceiling-light",
+                "id": entry.id,
+                "lb": [],
+                "mo": entry.modified_at.timestamp(),
+                "nm": "Hello World",
+                "on": None,
+                "op": {},
+                "pl": "test_platform",
+                "tk": None,
+                "ui": "1234",
+            },
+            "r": "test_domain.name",
+        },
+    }
+
+    registry.async_remove("test_domain.renamed")
+    await hass.async_block_till_done()
+
+    msg = await client.receive_json()
+    assert msg == {
+        "id": subscription,
+        "type": "event",
+        "event": {"r": "test_domain.renamed"},
+    }
+
     class Unserializable:
         """Good luck serializing me."""
 

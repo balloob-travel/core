@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from functools import partial
 import logging
 from typing import Any
 
@@ -10,13 +11,13 @@ import voluptuous as vol
 from homeassistant import config_entries
 from homeassistant.components import websocket_api
 from homeassistant.components.websocket_api import ERR_NOT_FOUND, require_admin
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.helpers import (
     config_validation as cv,
     device_registry as dr,
     entity_registry as er,
 )
-from homeassistant.helpers.json import json_dumps
+from homeassistant.helpers.json import json_bytes, json_dumps
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -30,6 +31,7 @@ def async_setup(hass: HomeAssistant) -> bool:
     websocket_api.async_register_command(hass, websocket_get_entity)
     websocket_api.async_register_command(hass, websocket_list_entities_for_display)
     websocket_api.async_register_command(hass, websocket_list_entities)
+    websocket_api.async_register_command(hass, websocket_subscribe_entities)
     websocket_api.async_register_command(hass, websocket_remove_entity)
     websocket_api.async_register_command(hass, websocket_update_entity)
     return True
@@ -90,6 +92,118 @@ def websocket_list_entities_for_display(
     )
     msg_json = b"".join((msg_json_prefix, inner, b"]}}"))
     connection.send_message(msg_json)
+
+
+@callback
+def _compressed_entity_dict(entry: er.RegistryEntry) -> dict[str, Any]:
+    """Return a compressed dict representation of an entity registry entry."""
+    return {
+        "ai": entry.area_id,
+        "ce": entry.config_entry_id,
+        "cg": entry.categories,
+        "cr": entry.created_at.timestamp(),
+        "cs": entry.config_subentry_id,
+        "db": entry.disabled_by,
+        "di": entry.device_id,
+        "ec": entry.entity_category,
+        "ei": entry.entity_id,
+        "hb": entry.hidden_by,
+        "hn": entry.has_entity_name,
+        "ic": entry.icon,
+        "id": entry.id,
+        "lb": list(entry.labels),
+        "mo": entry.modified_at.timestamp(),
+        "nm": entry.name,
+        "on": entry.original_name,
+        "op": entry.options,
+        "pl": entry.platform,
+        "tk": entry.translation_key,
+        "ui": entry.unique_id,
+    }
+
+
+@callback
+def _compressed_entity_json(entry: er.RegistryEntry) -> bytes | None:
+    """Return a compressed JSON representation of an entity registry entry."""
+    try:
+        return json_bytes(_compressed_entity_dict(entry))
+    except ValueError, TypeError:
+        _LOGGER.exception(
+            "Unable to serialize compact entity registry entry %s to JSON",
+            entry.entity_id,
+        )
+    return None
+
+
+@callback
+def _forward_entity_registry_changes(
+    connection: websocket_api.ActiveConnection,
+    registry: er.EntityRegistry,
+    msg_id: int,
+    event: Event[er.EventEntityRegistryUpdatedData],
+) -> None:
+    """Forward entity registry updates to the websocket."""
+    if event.data["action"] == "remove":
+        connection.send_message(
+            websocket_api.messages.construct_event_message(
+                msg_id, b'{"r":' + json_bytes(event.data["entity_id"]) + b"}"
+            )
+        )
+        return
+
+    entry = registry.async_get(event.data["entity_id"])
+    if entry is None:
+        return
+
+    entry_json = _compressed_entity_json(entry)
+    if entry_json is None:
+        return
+
+    if old_entity_id := event.data.get("old_entity_id"):
+        connection.send_message(
+            websocket_api.messages.construct_event_message(
+                msg_id,
+                b'{"u":' + entry_json + b',"r":' + json_bytes(old_entity_id) + b"}",
+            )
+        )
+        return
+
+    connection.send_message(
+        websocket_api.messages.construct_event_message(
+            msg_id, b'{"u":' + entry_json + b"}"
+        )
+    )
+
+
+@websocket_api.websocket_command(
+    {vol.Required("type"): "config/entity_registry/subscribe"}
+)
+@callback
+def websocket_subscribe_entities(
+    hass: HomeAssistant,
+    connection: websocket_api.ActiveConnection,
+    msg: dict[str, Any],
+) -> None:
+    """Handle subscribe entity registry command."""
+    registry = er.async_get(hass)
+    msg_id = msg["id"]
+    connection.subscriptions[msg_id] = hass.bus.async_listen(
+        er.EVENT_ENTITY_REGISTRY_UPDATED,
+        partial(_forward_entity_registry_changes, connection, registry, msg_id),
+    )
+    connection.send_result(msg_id)
+    connection.send_message(
+        websocket_api.messages.construct_event_message(
+            msg_id,
+            b'{"i":['
+            + b",".join(
+                entry_json
+                for entry in registry.entities.values()
+                if (entry_json := _compressed_entity_json(entry)) is not None
+            )
+            + b"]}",
+        )
+    )
 
 
 @websocket_api.websocket_command(
